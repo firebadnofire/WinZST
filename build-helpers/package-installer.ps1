@@ -23,7 +23,8 @@ $requiredFiles = @(
     @{ Source = $uninstallerStub; Name = "Uninstall.exe" },
     @{ Source = (Join-Path $repoRoot "CPP\7zip\Bundles\Alone2\$Arch\winzst.exe"); Name = "winzst.exe" },
     @{ Source = (Join-Path $repoRoot "CPP\7zip\Bundles\Fm\$Arch\WinZSTFM.exe"); Name = "WinZSTFM.exe" },
-    @{ Source = (Join-Path $repoRoot "CPP\7zip\UI\GUI\$Arch\WinZSTG.exe"); Name = "WinZSTG.exe" }
+    @{ Source = (Join-Path $repoRoot "CPP\7zip\UI\GUI\$Arch\WinZSTG.exe"); Name = "WinZSTG.exe" },
+    @{ Source = (Join-Path $repoRoot "build-helpers\assets\winzst-context-menu.cmd"); Name = "winzst-context-menu.cmd" }
 )
 
 foreach ($file in $requiredFiles) {
@@ -52,7 +53,7 @@ foreach ($file in $requiredFiles) {
 $optionalFiles = @(
     @{ Source = (Join-Path $repoRoot "CPP\7zip\UI\Explorer\$Arch\7-zip.dll"); Name = "7-zip.dll" },
     @{ Source = (Join-Path $repoRoot "CPP\7zip\UI\Explorer\$Arch\7-zip32.dll"); Name = "7-zip32.dll" },
-    @{ Source = (Join-Path $repoRoot "CPP\7zip\UI\FileManager\$Arch\7z.dll"); Name = "7z.dll" },
+    @{ Source = (Join-Path $repoRoot "CPP\7zip\Bundles\Format7zF\$Arch\7z.dll"); Name = "7z.dll" },
     @{ Source = (Join-Path $repoRoot "CPP\7zip\Bundles\SFXWin\$Arch\7z.sfx"); Name = "7z.sfx" },
     @{ Source = (Join-Path $repoRoot "CPP\7zip\Bundles\SFXCon\$Arch\7zCon.sfx"); Name = "7zCon.sfx" },
     @{ Source = (Join-Path $repoRoot "DOC\License.txt"); Name = "License.txt" },

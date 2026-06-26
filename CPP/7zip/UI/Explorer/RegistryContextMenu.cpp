@@ -24,9 +24,15 @@ static LPCTSTR const k_ShellExtName = TEXT("WinZST Shell Extension");
 
 static LPCTSTR const k_Approved = TEXT("Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved");
 static LPCTSTR const k_Inproc = TEXT("InprocServer32");
+static LPCTSTR const k_MUIVerb = TEXT("MUIVerb");
+static LPCTSTR const k_Icon = TEXT("Icon");
+static LPCTSTR const k_ExplorerCommandHandler = TEXT("ExplorerCommandHandler");
+static LPCTSTR const k_MultiSelectModel = TEXT("MultiSelectModel");
+static LPCTSTR const k_CommandStateSync = TEXT("CommandStateSync");
 
 static LPCSTR const k_KeyPostfix_ContextMenu = "\\shellex\\ContextMenuHandlers\\WinZST";
 static LPCSTR const k_KeyPostfix_DragDrop    = "\\shellex\\DragDropHandlers\\WinZST";
+static LPCSTR const k_KeyPostfix_ModernShell = "\\shell\\WinZST";
 
 static LPCSTR const k_KeyName_File      = "*";
 static LPCSTR const k_KeyName_Folder    = "Folder";
@@ -101,6 +107,9 @@ static LONG MyRegistry_DeleteKey_HKCR(LPCTSTR name, UInt32 wow)
 static AString Get_ContextMenuHandler_KeyName(LPCSTR keyName)
   { return (AString)keyName + k_KeyPostfix_ContextMenu; }
 
+static AString Get_ModernShell_KeyName(LPCSTR keyName)
+  { return (AString)keyName + k_KeyPostfix_ModernShell; }
+
 /*
 static CSysString Get_DragDropHandler_KeyName(LPCTSTR keyName)
   { return (AString)keyName + k_KeyPostfix_DragDrop); }
@@ -115,6 +124,33 @@ static bool CheckHandlerCommon(const AString &keyName, UInt32 wow)
   if (key.QueryValue(NULL, value) != ERROR_SUCCESS)
     return false;
   return StringsAreEqualNoCase_Ascii(value, k_Clsid_A);
+}
+
+static bool CheckModernHandlerCommon(const AString &keyName, const UString &path, UInt32 wow)
+{
+  CKey key;
+  if (key.Open(HKEY_CLASSES_ROOT, (CSysString)keyName, KEY_READ | wow) != ERROR_SUCCESS)
+    return false;
+
+  UString clsid;
+  if (key.QueryValue(k_ExplorerCommandHandler, clsid) != ERROR_SUCCESS)
+    return false;
+  if (!clsid.IsEqualTo_Ascii_NoCase(k_Clsid_A))
+    return false;
+
+  UString muiVerb;
+  if (key.QueryValue(k_MUIVerb, muiVerb) != ERROR_SUCCESS)
+    return false;
+  if (!muiVerb.IsEqualTo_Ascii_NoCase("WinZST"))
+    return false;
+
+  UString iconPath;
+  if (key.QueryValue(k_Icon, iconPath) != ERROR_SUCCESS)
+    return false;
+  if (!iconPath.IsEqualTo_NoCase(path))
+    return false;
+
+  return true;
 }
 
 bool CheckContextMenuHandler(const UString &path, UInt32 wow)
@@ -137,7 +173,11 @@ bool CheckContextMenuHandler(const UString &path, UInt32 wow)
   }
   
   return
-       CheckHandlerCommon(Get_ContextMenuHandler_KeyName(k_KeyName_File), wow);
+       CheckHandlerCommon(Get_ContextMenuHandler_KeyName(k_KeyName_File), wow)
+    && CheckModernHandlerCommon(Get_ModernShell_KeyName(k_KeyName_File), path, wow)
+    && CheckModernHandlerCommon(Get_ModernShell_KeyName(k_KeyName_Directory), path, wow)
+    && CheckModernHandlerCommon(Get_ModernShell_KeyName(k_KeyName_Folder), path, wow)
+    && CheckModernHandlerCommon(Get_ModernShell_KeyName(k_KeyName_Drive), path, wow);
   /*
     && CheckHandlerCommon(Get_ContextMenuHandler_KeyName(k_KeyName_Directory), wow)
     // && CheckHandlerCommon(Get_ContextMenuHandler_KeyName(k_KeyName_Folder))
@@ -152,6 +192,28 @@ static LONG MyCreateKey(CKey &key, HKEY parentKey, LPCTSTR keyName, UInt32 wow)
 {
   return key.Create(parentKey, keyName, REG_NONE,
       REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS | wow);
+}
+
+static LONG SetModernShellHandler(bool setMode, const AString &keyName, const UString &path, UInt32 wow)
+{
+  if (!setMode)
+    return MyRegistry_DeleteKey_HKCR((CSysString)keyName, wow);
+
+  CKey key;
+  LONG res = MyCreateKey(key, HKEY_CLASSES_ROOT, (CSysString)keyName, wow);
+  if (res != ERROR_SUCCESS)
+    return res;
+
+  res = key.SetValue(k_MUIVerb, TEXT("WinZST"));
+  if (res == ERROR_SUCCESS)
+    res = key.SetValue(k_Icon, path);
+  if (res == ERROR_SUCCESS)
+    res = key.SetValue(k_ExplorerCommandHandler, k_Clsid);
+  if (res == ERROR_SUCCESS)
+    res = key.SetValue(k_MultiSelectModel, TEXT("Player"));
+  if (res == ERROR_SUCCESS)
+    res = key.SetValue(k_CommandStateSync, TEXT(""));
+  return res;
 }
 
 LONG SetContextMenuHandler(bool setMode, const UString &path, UInt32 wow)
@@ -217,6 +279,23 @@ LONG SetContextMenuHandler(bool setMode, const UString &path, UInt32 wow)
       else
         MyRegistry_DeleteKey_HKCR(s, wow);
     }
+  }
+
+  static const LPCSTR k_ModernShellPrefixes[] =
+  {
+    k_KeyName_File,
+    k_KeyName_Directory,
+    k_KeyName_Folder,
+    k_KeyName_Drive
+  };
+
+  for (unsigned i = 0; i < Z7_ARRAY_SIZE(k_ModernShellPrefixes); i++)
+  {
+    const LONG res2 = SetModernShellHandler(setMode,
+        Get_ModernShell_KeyName(k_ModernShellPrefixes[i]),
+        path, wow);
+    if (res == ERROR_SUCCESS)
+      res = res2;
   }
 
   return res;

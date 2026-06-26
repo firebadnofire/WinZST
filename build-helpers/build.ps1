@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Alone2", "Alone", "Alone7z", "Fm", "Gui", "Explorer", "Installer", "Uninstaller", "LzmaCon", "SFXCon", "SFXWin", "Setup")]
+    [ValidateSet("Alone2", "Alone", "Alone7z", "Format7zF", "Fm", "Gui", "Explorer", "Installer", "Uninstaller", "LzmaCon", "SFXCon", "SFXWin", "Setup")]
     [string]$Target = "Alone2",
 
     [ValidateSet("x64", "x86", "arm64")]
@@ -21,6 +21,7 @@ $targetMap = @{
     "Alone2"  = @{ RelativePath = "CPP\7zip\Bundles\Alone2";  Output = "winzst.exe" }
     "Alone"   = @{ RelativePath = "CPP\7zip\Bundles\Alone";   Output = "7za.exe" }
     "Alone7z" = @{ RelativePath = "CPP\7zip\Bundles\Alone7z"; Output = "7zr.exe" }
+    "Format7zF" = @{ RelativePath = "CPP\7zip\Bundles\Format7zF"; Output = "7z.dll" }
     "Fm"      = @{ RelativePath = "CPP\7zip\Bundles\Fm";      Output = "WinZSTFM.exe" }
     "Gui"     = @{ RelativePath = "CPP\7zip\UI\GUI";          Output = "WinZSTG.exe" }
     "Explorer" = @{ RelativePath = "CPP\7zip\UI\Explorer";    Output = "7-zip.dll" }
@@ -74,7 +75,7 @@ function Invoke-BuildTarget {
 }
 
 if ($Target -eq "Setup") {
-    $setupDependencies = @("Installer", "Uninstaller", "Alone2", "Fm", "Gui", "Explorer")
+    $setupDependencies = @("Installer", "Uninstaller", "Alone2", "Format7zF", "Fm", "Gui", "Explorer")
     foreach ($dependency in $setupDependencies) {
         Invoke-BuildTarget -BuildTarget $dependency | Out-Null
     }

@@ -9,6 +9,9 @@ CFLAGS = $(CFLAGS) \
 
 !include "Arc.mak"
 
+COMMON_OBJS = $(COMMON_OBJS) \
+  $O\FileStreams.obj \
+
 COMPRESS_OBJS = $(COMPRESS_OBJS) \
   $O\CodecExports.obj \
 

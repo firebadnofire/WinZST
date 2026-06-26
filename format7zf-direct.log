@@ -1,0 +1,34 @@
+
+Microsoft (R) Program Maintenance Utility Version 14.44.35224.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+	link  -nologo -OPT:REF -OPT:ICF -INCREMENTAL:NO /LARGEADDRESSAWARE -DLL -DEF:../../Archive/Archive2.def -out:x64\7z.dll @C:\Users\william\AppData\Local\Temp\nm546D.tmp
+   Creating library x64\7z.lib and object x64\7z.exp
+TarWrapUpdate.obj : error LNK2019: unresolved external symbol "public: virtual long __cdecl CInFileStream::GetSize(unsigned __int64 *)" (?GetSize@CInFileStream@@UEAAJPEA_K@Z) referenced in function "public: long __cdecl NArchive::NTarWrap::CTempTarInStream::Create(unsigned int,struct IArchiveUpdateCallback *,bool)" (?Create@CTempTarInStream@NTarWrap@NArchive@@QEAAJIPEAUIArchiveUpdateCallback@@_N@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "public: virtual long __cdecl CInFileStream::GetSize(unsigned __int64 *)" (?GetSize@CInFileStream@@UEAAJPEA_K@Z)
+GzHandler.obj : error LNK2001: unresolved external symbol "public: virtual long __cdecl CInFileStream::GetSize(unsigned __int64 *)" (?GetSize@CInFileStream@@UEAAJPEA_K@Z)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "public: virtual long __cdecl CInFileStream::GetSize(unsigned __int64 *)" (?GetSize@CInFileStream@@UEAAJPEA_K@Z)
+TarWrapUpdate.obj : error LNK2019: unresolved external symbol "public: __cdecl CInFileStream::CInFileStream(void)" (??0CInFileStream@@QEAA@XZ) referenced in function "public: long __cdecl NArchive::NTarWrap::CTempTarInStream::Create(unsigned int,struct IArchiveUpdateCallback *,bool)" (?Create@CTempTarInStream@NTarWrap@NArchive@@QEAAJIPEAUIArchiveUpdateCallback@@_N@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "public: __cdecl CInFileStream::CInFileStream(void)" (??0CInFileStream@@QEAA@XZ)
+GzHandler.obj : error LNK2001: unresolved external symbol "public: __cdecl CInFileStream::CInFileStream(void)" (??0CInFileStream@@QEAA@XZ)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "public: __cdecl CInFileStream::CInFileStream(void)" (??0CInFileStream@@QEAA@XZ)
+TarWrapUpdate.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Seek(__int64,unsigned int,unsigned __int64 *)" (?Seek@COutFileStream@@EEAAJ_JIPEA_K@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Seek(__int64,unsigned int,unsigned __int64 *)" (?Seek@COutFileStream@@EEAAJ_JIPEA_K@Z)
+GzHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Seek(__int64,unsigned int,unsigned __int64 *)" (?Seek@COutFileStream@@EEAAJ_JIPEA_K@Z)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Seek(__int64,unsigned int,unsigned __int64 *)" (?Seek@COutFileStream@@EEAAJ_JIPEA_K@Z)
+TarWrapUpdate.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::SetSize(unsigned __int64)" (?SetSize@COutFileStream@@EEAAJ_K@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::SetSize(unsigned __int64)" (?SetSize@COutFileStream@@EEAAJ_K@Z)
+GzHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::SetSize(unsigned __int64)" (?SetSize@COutFileStream@@EEAAJ_K@Z)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::SetSize(unsigned __int64)" (?SetSize@COutFileStream@@EEAAJ_K@Z)
+TarWrapUpdate.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Write(void const *,unsigned int,unsigned int *)" (?Write@COutFileStream@@EEAAJPEBXIPEAI@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Write(void const *,unsigned int,unsigned int *)" (?Write@COutFileStream@@EEAAJPEBXIPEAI@Z)
+GzHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Write(void const *,unsigned int,unsigned int *)" (?Write@COutFileStream@@EEAAJPEBXIPEAI@Z)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "private: virtual long __cdecl COutFileStream::Write(void const *,unsigned int,unsigned int *)" (?Write@COutFileStream@@EEAAJPEBXIPEAI@Z)
+TarWrapUpdate.obj : error LNK2019: unresolved external symbol "public: long __cdecl COutFileStream::Close(void)" (?Close@COutFileStream@@QEAAJXZ) referenced in function "public: long __cdecl NArchive::NTarWrap::CTempTarInStream::Create(unsigned int,struct IArchiveUpdateCallback *,bool)" (?Create@CTempTarInStream@NTarWrap@NArchive@@QEAAJIPEAUIArchiveUpdateCallback@@_N@Z)
+Bz2Handler.obj : error LNK2001: unresolved external symbol "public: long __cdecl COutFileStream::Close(void)" (?Close@COutFileStream@@QEAAJXZ)
+GzHandler.obj : error LNK2001: unresolved external symbol "public: long __cdecl COutFileStream::Close(void)" (?Close@COutFileStream@@QEAAJXZ)
+ZstdHandler.obj : error LNK2001: unresolved external symbol "public: long __cdecl COutFileStream::Close(void)" (?Close@COutFileStream@@QEAAJXZ)
+x64\7z.dll : fatal error LNK1120: 6 unresolved externals
+NMAKE : fatal error U1077: 'link  -nologo -OPT:REF -OPT:ICF -INCREMENTAL:NO /LARGEADDRESSAWARE -DLL -DEF:../../Archive/Archive2.def -out:x64\7z.dll @C:\Users\william\AppData\Local\Temp\nm546D.tmp' : return code '0x460'
+Stop.
+EXITCODE=2 

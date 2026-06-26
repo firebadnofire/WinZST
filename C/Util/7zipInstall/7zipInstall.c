@@ -858,6 +858,25 @@ static void SetShellProgramsGroup(HWND hwndOwner)
 
 static LPCWSTR const k_Shell_Approved = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
 static LPCWSTR const k_7zip_ShellExtension = L"WinZST Shell Extension";
+static LPCWSTR const k_Reg_MUIVerb = L"MUIVerb";
+static LPCWSTR const k_Reg_Icon = L"Icon";
+static LPCWSTR const k_Reg_SubCommands = L"SubCommands";
+static LPCWSTR const k_Reg_MultiSelectModel = L"MultiSelectModel";
+static LPCWSTR const k_Reg_ExplorerCommandHandler = L"ExplorerCommandHandler";
+static LPCWSTR const k_Reg_CommandStateSync = L"CommandStateSync";
+static LPCWSTR const k_CommandStoreShell = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CommandStore\\shell\\";
+static LPCWSTR const k_UserClassesRoot = L"Software\\Classes\\";
+static LPCWSTR const k_FileSubCommands =
+    L"WinZST.Open;"
+    L"WinZST.ExtractHere;"
+    L"WinZST.ExtractTo;"
+    L"WinZST.CompressTzs;"
+    L"WinZST.CompressZip;"
+    L"WinZST.Compress7z";
+static LPCWSTR const k_FolderSubCommands =
+    L"WinZST.CompressTzs;"
+    L"WinZST.CompressZip;"
+    L"WinZST.Compress7z";
 
 static void WriteCLSID(void)
 {
@@ -910,10 +929,90 @@ static LPCSTR const k_ShellEx_Items[] =
   , "Drive\\shellex\\DragDropHandlers"
 };
 
+static LPCSTR const k_ModernShell_Items[] =
+{
+    "*\\shell\\WinZST"
+  , "Directory\\shell\\WinZST"
+  , "Folder\\shell\\WinZST"
+  , "Drive\\shell\\WinZST"
+};
+
+static void Build_ContextMenu_Helper_Path(WCHAR *destPath)
+{
+  wcscpy(destPath, path);
+  CatAscii(destPath, "winzst-context-menu.cmd");
+}
+
+static void Build_FM_Path(WCHAR *destPath)
+{
+  wcscpy(destPath, path);
+  CatAscii(destPath, "WinZSTFM.exe");
+}
+
+static void Build_Command_String(WCHAR *destPath, const wchar_t *action)
+{
+  destPath[0] = L'\"';
+  Build_ContextMenu_Helper_Path(destPath + 1);
+  wcscat(destPath, L"\" ");
+  wcscat(destPath, action);
+  wcscat(destPath, L" \"%1\"");
+}
+
+static void WriteSubCommand(LPCWSTR verb, LPCWSTR title, LPCWSTR action, LPCWSTR iconPath)
+{
+  WCHAR keyPath[MAX_PATH * 2];
+  WCHAR commandPath[MAX_PATH * 2];
+  WCHAR command[MAX_PATH * 2];
+  HKEY destKey = 0;
+
+  wcscpy(keyPath, k_CommandStoreShell);
+  wcscat(keyPath, verb);
+
+  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, keyPath, &destKey) != ERROR_SUCCESS)
+    return;
+
+  MyRegistry_SetString(destKey, k_Reg_MUIVerb, title);
+  MyRegistry_SetString(destKey, k_Reg_Icon, iconPath);
+  RegCloseKey(destKey);
+
+  wcscpy(commandPath, keyPath);
+  wcscat(commandPath, L"\\command");
+
+  destKey = 0;
+  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, commandPath, &destKey) != ERROR_SUCCESS)
+    return;
+
+  Build_Command_String(command, action);
+  MyRegistry_SetString(destKey, NULL, command);
+  RegCloseKey(destKey);
+}
+
+static void WriteStaticShellRoot(LPCSTR keyNameA, LPCWSTR iconPath, LPCWSTR subCommands)
+{
+  WCHAR keyName[MAX_PATH + 80];
+  WCHAR fullKeyName[MAX_PATH + 100];
+  HKEY destKey = 0;
+
+  CpyAscii(keyName, keyNameA);
+  wcscpy(fullKeyName, k_UserClassesRoot);
+  wcscat(fullKeyName, keyName);
+  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, fullKeyName, &destKey) != ERROR_SUCCESS)
+    return;
+
+  MyRegistry_SetString(destKey, k_Reg_MUIVerb, L"WinZST");
+  MyRegistry_SetString(destKey, k_Reg_Icon, iconPath);
+  MyRegistry_SetString(destKey, k_Reg_SubCommands, subCommands);
+  MyRegistry_SetString(destKey, k_Reg_MultiSelectModel, L"Player");
+  RegDeleteValueW(destKey, k_Reg_ExplorerCommandHandler);
+  RegDeleteValueW(destKey, k_Reg_CommandStateSync);
+  RegCloseKey(destKey);
+}
+
 static void WriteShellEx(void)
 {
   unsigned i;
   WCHAR destPath[MAX_PATH + 40];
+  WCHAR iconPath[MAX_PATH + 40];
 
   for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
   {
@@ -931,9 +1030,22 @@ static void WriteShellEx(void)
   #endif
   MyRegistry_CreateKeyAndVal   (HKEY_LOCAL_MACHINE, k_Shell_Approved, k_7zip_CLSID, k_7zip_ShellExtension);
 
+  Build_FM_Path(iconPath);
 
-  wcscpy(destPath, path);
-  CatAscii(destPath, "WinZSTFM.exe");
+  WriteSubCommand(L"WinZST.Open", L"Open archive", L"open", iconPath);
+  WriteSubCommand(L"WinZST.ExtractHere", L"Extract here", L"extract-here", iconPath);
+  WriteSubCommand(L"WinZST.ExtractTo", L"Extract to folder", L"extract-to", iconPath);
+  WriteSubCommand(L"WinZST.CompressTzs", L"Compress to .tzs", L"compress-tzs", iconPath);
+  WriteSubCommand(L"WinZST.CompressZip", L"Compress to .zip", L"compress-zip", iconPath);
+  WriteSubCommand(L"WinZST.Compress7z", L"Compress to .7z", L"compress-7z", iconPath);
+
+  for (i = 0; i < Z7_ARRAY_SIZE(k_ModernShell_Items); i++)
+  {
+    const LPCWSTR subCommands = (i == 0) ? k_FileSubCommands : k_FolderSubCommands;
+    WriteStaticShellRoot(k_ModernShell_Items[i], iconPath, subCommands);
+  }
+
+  wcscpy(destPath, iconPath);
   
   {
     HKEY destKey = 0;

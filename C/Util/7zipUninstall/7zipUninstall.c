@@ -440,6 +440,24 @@ static LPCSTR const k_ShellEx_Items[] =
 };
 
 static LPCWSTR const k_Shell_Approved = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
+static LPCWSTR const k_CommandStoreShell = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CommandStore\\shell\\";
+static LPCWSTR const k_UserClassesRoot = L"Software\\Classes\\";
+static LPCWSTR const k_ModernShell_Items[] =
+{
+    L"*\\shell\\WinZST"
+  , L"Directory\\shell\\WinZST"
+  , L"Folder\\shell\\WinZST"
+  , L"Drive\\shell\\WinZST"
+};
+static LPCWSTR const k_CommandStore_Items[] =
+{
+    L"WinZST.Open"
+  , L"WinZST.ExtractHere"
+  , L"WinZST.ExtractTo"
+  , L"WinZST.CompressTzs"
+  , L"WinZST.CompressZip"
+  , L"WinZST.Compress7z"
+};
 
 static LPCWSTR const k_AppPaths_7zFm = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinZSTFM.exe";
 #define k_REG_Uninstall L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
@@ -464,9 +482,43 @@ static BoolInt AreEqual_Path_PrefixName(const wchar_t *s, const wchar_t *prefix,
   return AreStringsEqual_NoCase(s + wcslen(prefix), name);
 }
 
+static void DeleteCommandStoreKey(LPCWSTR name)
+{
+  WCHAR keyPath[MAX_PATH + 160];
+
+  wcscpy(keyPath, k_CommandStoreShell);
+  wcscat(keyPath, name);
+
+  {
+    WCHAR commandPath[MAX_PATH + 180];
+    wcscpy(commandPath, keyPath);
+    wcscat(commandPath, L"\\command");
+    MyRegistry_DeleteKey(HKEY_CURRENT_USER, commandPath);
+  }
+
+  MyRegistry_DeleteKey(HKEY_CURRENT_USER, keyPath);
+}
+
+static void DeleteModernShellKeys(void)
+{
+  unsigned i;
+  for (i = 0; i < Z7_ARRAY_SIZE(k_ModernShell_Items); i++)
+  {
+    WCHAR keyPath[MAX_PATH + 100];
+    wcscpy(keyPath, k_UserClassesRoot);
+    wcscat(keyPath, k_ModernShell_Items[i]);
+    MyRegistry_DeleteKey(HKEY_CURRENT_USER, keyPath);
+  }
+
+  for (i = 0; i < Z7_ARRAY_SIZE(k_CommandStore_Items); i++)
+    DeleteCommandStoreKey(k_CommandStore_Items[i]);
+}
+
 static void WriteCLSID(void)
 {
   WCHAR s[MAX_PATH + 30];
+
+  DeleteModernShellKeys();
   
   if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip_Inproc, NULL, s))
   {
@@ -681,7 +733,7 @@ static BOOL RemoveDir(void)
   #define NUM_EXTRA_FILES_64BIT 0
 #endif
 
-#define NUM_FILES (NUM_LANG_TXT_FILES + 1 + 13 + NUM_EXTRA_FILES_64BIT)
+#define NUM_FILES (NUM_LANG_TXT_FILES + 1 + 14 + NUM_EXTRA_FILES_64BIT)
 
 static const char * const k_Names =
   "af an ar ast az ba be bg bn br ca co cs cy da de el eo es et eu ext"
@@ -697,6 +749,7 @@ static const char * const k_Names =
   " 7zCon.sfx"
   " winzst.exe"
   " WinZSTG.exe"
+  " winzst-context-menu.cmd"
   " 7z.dll"
   " WinZSTFM.exe"
   #ifdef USE_7ZIP_32_DLL
