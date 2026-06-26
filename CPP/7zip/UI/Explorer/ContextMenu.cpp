@@ -2,6 +2,8 @@
 
 #include "StdAfx.h"
 
+#include <string.h>
+
 #include "../../../Common/ComTry.h"
 #include "../../../Common/IntToString.h"
 #include "../../../Common/StringConvert.h"
@@ -277,6 +279,7 @@ static const CContextMenuCommand g_Commands[] =
   CMD_REC( kTest,        "Test",        IDS_CONTEXT_TEST),
   CMD_REC( kCompress,           "Compress",           IDS_CONTEXT_COMPRESS),
   CMD_REC( kCompressEmail,      "CompressEmail",      IDS_CONTEXT_COMPRESS_EMAIL),
+  CMD_REC( kCompressToTzs,      "CompressToTzs",      IDS_CONTEXT_COMPRESS_TO),
   CMD_REC( kCompressTo7z,       "CompressTo7z",       IDS_CONTEXT_COMPRESS_TO),
   CMD_REC( kCompressTo7zEmail,  "CompressTo7zEmail",  IDS_CONTEXT_COMPRESS_TO_EMAIL),
   CMD_REC( kCompressToZip,      "CompressToZip",      IDS_CONTEXT_COMPRESS_TO),
@@ -444,9 +447,47 @@ static bool IsItArcExt(const UString &ext)
   return false;
 }
 
+static bool RemoveArchiveSuffix(UString &name, const char *suffix)
+{
+  const unsigned len = (unsigned)strlen(suffix);
+  if (name.Len() <= len)
+    return false;
+  if (!StringsAreEqualNoCase_Ascii(name.RightPtr(len), suffix))
+    return false;
+  name.DeleteFrom(name.Len() - len);
+  name.TrimRight();
+  return true;
+}
+
+static bool RemoveTarballSuffix(UString &name)
+{
+  static const char * const kTarballSuffixes[] =
+  {
+      ".tar.zst"
+    , ".tzs"
+    , ".tzst"
+    , ".tzstd"
+    , ".tar.gz"
+    , ".tgz"
+    , ".tar.xz"
+    , ".txz"
+    , ".tar.bz2"
+    , ".tbz2"
+  };
+
+  for (unsigned i = 0; i < Z7_ARRAY_SIZE(kTarballSuffixes); i++)
+    if (RemoveArchiveSuffix(name, kTarballSuffixes[i]))
+      return true;
+  return false;
+}
+
 UString GetSubFolderNameForExtract(const UString &arcName);
 UString GetSubFolderNameForExtract(const UString &arcName)
 {
+  UString tarballName = arcName;
+  if (RemoveTarballSuffix(tarballName))
+    return Get_Correct_FsFile_Name(tarballName);
+
   int dotPos = arcName.ReverseFind_Dot();
   if (dotPos < 0)
     return Get_Correct_FsFile_Name(arcName) + L'~';
@@ -903,6 +944,10 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
       arcName_Show += "_";
     }
 
+    UString arcName_tzs = arcName;
+    arcName_tzs += ".tzs";
+    UString arcName_tzs_Show = arcName_Show;
+    arcName_tzs_Show += ".tzs";
     UString arcName_7z = arcName;
     arcName_7z += ".7z";
     UString arcName_7z_Show = arcName_Show;
@@ -936,6 +981,24 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
       MyInsertMenu(popupMenu, subIndex++, currentCommandID++, mainString, bitmap);
     }
     #endif
+
+    // CompressToTzs
+    if (contextMenuFlags & NContextMenuFlags::kCompressToTzs &&
+        !arcName_tzs.IsEqualTo_NoCase(fs2us(fi0.Name)))
+    {
+      CCommandMapItem cmi;
+      UString s;
+      if (_dropMode)
+        cmi.Folder = _dropPath;
+      else
+        cmi.Folder = fs2us(folderPrefix);
+      cmi.ArcName = arcName_tzs;
+      cmi.ArcType = "zstd";
+      AddCommand(kCompressToTzs, s, cmi);
+      MyFormatNew_ReducedName(s, arcName_tzs_Show);
+      Set_UserString_in_LastCommand(s);
+      MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
+    }
 
     // CompressTo7z
     if (contextMenuFlags & NContextMenuFlags::kCompressTo7z &&
@@ -1015,7 +1078,8 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
     CMenu menu;
     menu.Attach(hMenu);
     menuDestroyer.Disable();
-    MyAddSubMenu(_commandMap, kMainVerb, menu, indexMenu++, currentCommandID++, (UString)"7-Zip",
+    MyAddSubMenu(_commandMap, kMainVerb, menu, indexMenu++, currentCommandID++,
+        (UString)(_isMenuForFM ? "WinZST" : "7-Zip"),
         popupMenu, // popupMenu.Detach(),
         bitmap);
   }
@@ -1186,7 +1250,7 @@ int CZipContextMenu::FindVerb(const UString &verb) const
 
 static UString Get7zFmPath()
 {
-  return fs2us(NWindows::NDLL::GetModuleDirPrefix()) + L"7zFM.exe";
+  return fs2us(NWindows::NDLL::GetModuleDirPrefix()) + L"WinZSTFM.exe";
 }
 
 
@@ -1296,6 +1360,7 @@ HRESULT CZipContextMenu::InvokeCommandCommon(const CCommandMapItem &cmi)
       }
       case kCompress:
       case kCompressEmail:
+      case kCompressToTzs:
       case kCompressTo7z:
       case kCompressTo7zEmail:
       case kCompressToZip:
@@ -1311,7 +1376,9 @@ HRESULT CZipContextMenu::InvokeCommandCommon(const CCommandMapItem &cmi)
               NULL, // fi0
               arcName_base);
           const char *postfix = NULL;
-          if (cmdID == kCompressTo7z ||
+          if (cmdID == kCompressToTzs)
+            postfix = ".tzs";
+          else if (cmdID == kCompressTo7z ||
               cmdID == kCompressTo7zEmail)
             postfix = ".7z";
           else if (

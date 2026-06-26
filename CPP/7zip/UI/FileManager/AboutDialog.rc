@@ -14,7 +14,7 @@ IDI_LOGO ICON "../../UI/FileManager/7zipLogo.ico"
 #endif
 
 IDD_ABOUT DIALOG 0, 0, xs, ys  MY_MODAL_DIALOG_STYLE  MY_FONT
-CAPTION "About 7-Zip"
+CAPTION "About WinZST"
 {
   DEFPUSHBUTTON  "OK", IDOK, bx1, by, bxs, bys
   PUSHBUTTON  "www.7-zip.org", IDB_ABOUT_HOMEPAGE, bx2, by, bxs, bys
@@ -22,5 +22,5 @@ CAPTION "About 7-Zip"
   LTEXT  "", IDT_ABOUT_VERSION, m, 54, xc, 8
   LTEXT  "", IDT_ABOUT_DATE, m, 67, xc, 8
   LTEXT  MY_COPYRIGHT, -1, m, 80, xc, 8
-  LTEXT  "7-Zip is free software", IDT_ABOUT_INFO, m, y, xc, (by - y - 1)
+  LTEXT  "WinZST is free software. Forked from 7-Zip.", IDT_ABOUT_INFO, m, y, xc, (by - y - 1)
 }

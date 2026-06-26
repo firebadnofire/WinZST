@@ -37,7 +37,7 @@ bool CAboutDialog::OnInit()
     UString s;
     g_CodecsObj->GetCodecsErrorMessage(s);
     if (!s.IsEmpty())
-      MessageBoxW(GetParent(), s, L"7-Zip", MB_ICONERROR);
+      MessageBoxW(GetParent(), s, L"WinZST", MB_ICONERROR);
   }
   #endif
 
@@ -45,7 +45,7 @@ bool CAboutDialog::OnInit()
   LangSetWindowText(*this, IDD_ABOUT);
   LangSetDlgItems(*this, kLangIDs, Z7_ARRAY_SIZE(kLangIDs));
   #endif
-  SetItemText(IDT_ABOUT_VERSION, UString("7-Zip " MY_VERSION_CPU));
+  SetItemText(IDT_ABOUT_VERSION, UString("WinZST " MY_VERSION_CPU));
   SetItemText(IDT_ABOUT_DATE, LLL(MY_DATE));
   
   NormalizePosition();

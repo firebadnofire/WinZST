@@ -131,7 +131,7 @@ enum EMethodID
   kDeflate,
   kDeflate64,
   kPPMdZip,
-  // kZSTD,
+  kZSTD,
   kSha256,
   kSha1,
   kCrc32,
@@ -150,7 +150,7 @@ static LPCSTR const kMethodsNames[] =
   , "Deflate"
   , "Deflate64"
   , "PPMd"
-  // , "ZSTD"
+  , "Zstandard"
   , "SHA256"
   , "SHA1"
   , "CRC32"
@@ -204,12 +204,10 @@ static const EMethodID g_XzMethods[] =
   kLZMA2
 };
 
-/*
 static const EMethodID g_ZstdMethods[] =
 {
   kZSTD
 };
-*/
 
 /*
 static const EMethodID g_SwfcMethods[] =
@@ -221,6 +219,10 @@ static const EMethodID g_SwfcMethods[] =
 
 static const EMethodID g_TarMethods[] =
 {
+  kZSTD,
+  kDeflate,
+  kBZip2,
+  kLZMA2,
   kGnu,
   kPosix
 };
@@ -314,17 +316,12 @@ static const CFormatInfo g_Formats[] =
     METHODS_PAIR(g_XzMethods),
     kFF_Solid | kFF_MultiThread | kFF_MemUse
   },
-  /*
   {
     "zstd",
-    // (1 << (MY_ZSTD_LEVEL_MAX + 1)) - 1,
-    (1 << (9 + 1)) - 1,
+    ((UInt32)1 << 10) - 1 - (1 << 0),
     METHODS_PAIR(g_ZstdMethods),
-    // kFF_Solid |
-    kFF_MultiThread
-    | kFF_MemUse
+    0
   },
-  */
 /*
   {
     "Swfc",
@@ -778,6 +775,8 @@ static int GetExtDotPos(const UString &s)
   return -1;
 }
 
+static bool RemoveTarFamilySuffix(UString &s);
+
 void CCompressDialog::OnButtonSFX()
 {
   UString fileName;
@@ -934,7 +933,12 @@ void CCompressDialog::OnButtonSetArchive()
       // we use only main ext in desc to reduce the size of list
       if (i != 0)
         desc.Add_Space();
-      desc += ai.GetMainExt();
+      if (ai.Is_Tar())
+        desc += GetTarFamilyExtension();
+      else if (ai.Is_Zstd())
+        desc += "zst";
+      else
+        desc += ai.GetMainExt();
     }
 
     CBrowseFilterInfo &f = filters.AddNew();
@@ -982,6 +986,9 @@ void CCompressDialog::OnButtonSetArchive()
     bool needAddExt = true;
     const CArcInfoEx &ai = (*ArcFormats)[(unsigned)m_Format.GetItemData((unsigned)bi.FilterIndex)];
     const int dotPos = GetExtDotPos(path);
+    UString path2 = path;
+    if (ai.Is_Tar() && RemoveTarFamilySuffix(path2))
+      needAddExt = false;
     if (dotPos >= 0)
     {
       const UString ext = path.Ptr(dotPos + 1);
@@ -992,7 +999,12 @@ void CCompressDialog::OnButtonSetArchive()
     {
       if (path.IsEmpty() || path.Back() != '.')
         path.Add_Dot();
-      path += ai.GetMainExt();
+      if (ai.Is_Tar())
+        path += GetTarFamilyExtension();
+      else if (ai.Is_Zstd())
+        path += "zst";
+      else
+        path += ai.GetMainExt();
     }
   }
 
@@ -1167,9 +1179,10 @@ void CCompressDialog::OnOK()
           ((UInt64)1 << solidLogSize);
   }
 
-  Info.Method = GetMethodSpec();
+  const bool isTarZstd = IsTarZstdMethod();
+  Info.Method = isTarZstd ? UString("gnu") : GetMethodSpec();
   Info.EncryptionMethod = GetEncryptionMethodSpec();
-  Info.FormatIndex = (int)GetFormatIndex();
+  Info.FormatIndex = (int)GetFinalFormatIndex();
   Info.SFXMode = IsSFX();
   Info.OpenShareForWrite = IsButtonCheckedBool(IDX_COMPRESS_SHARED);
   Info.DeleteAfterCompressing = IsButtonCheckedBool(IDX_COMPRESS_DEL);
@@ -1228,14 +1241,14 @@ void CCompressDialog::OnOK()
         wchar_t s[32];
         ConvertUInt64ToString(volumeSize, s);
         if (::MessageBoxW(*this, MyFormatNew(IDS_SPLIT_CONFIRM, s),
-            L"7-Zip", MB_YESNOCANCEL | MB_ICONQUESTION) != IDYES)
+            L"WinZST", MB_YESNOCANCEL | MB_ICONQUESTION) != IDYES)
           return;
       }
     }
   }
 
-  if (Info.FormatIndex >= 0)
-    m_RegistryInfo.ArcType = (*ArcFormats)[Info.FormatIndex].Name;
+  if (GetFormatIndex() < ArcFormats->Size())
+    m_RegistryInfo.ArcType = (*ArcFormats)[GetFormatIndex()].Name;
   m_RegistryInfo.ShowPassword = IsShowPasswordChecked();
 
   FOR_VECTOR (i, m_RegistryInfo.ArcPaths)
@@ -1266,6 +1279,45 @@ void CCompressDialog::ArcPath_WasChanged(const UString &path)
   if (dotPos < 0)
     return;
   const UString ext = path.Ptr(dotPos + 1);
+
+  int tarMethodID = -1;
+  if (ext.IsEqualTo_Ascii_NoCase("tzs")
+      || ext.IsEqualTo_Ascii_NoCase("tzst")
+      || ext.IsEqualTo_Ascii_NoCase("tzstd")
+      || (path.Len() >= 8 && StringsAreEqualNoCase_Ascii(path.RightPtr(8), ".tar.zst")))
+    tarMethodID = kZSTD;
+  else if (ext.IsEqualTo_Ascii_NoCase("tgz")
+      || (path.Len() >= 7 && StringsAreEqualNoCase_Ascii(path.RightPtr(7), ".tar.gz")))
+    tarMethodID = kDeflate;
+  else if (ext.IsEqualTo_Ascii_NoCase("tbz2")
+      || ext.IsEqualTo_Ascii_NoCase("tbz")
+      || (path.Len() >= 8 && StringsAreEqualNoCase_Ascii(path.RightPtr(8), ".tar.bz2")))
+    tarMethodID = kBZip2;
+  else if (ext.IsEqualTo_Ascii_NoCase("txz")
+      || (path.Len() >= 7 && StringsAreEqualNoCase_Ascii(path.RightPtr(7), ".tar.xz")))
+    tarMethodID = kLZMA2;
+  else if (ext.IsEqualTo_Ascii_NoCase("tar"))
+    tarMethodID = kGnu;
+
+  if (tarMethodID >= 0)
+  {
+    const unsigned count = (unsigned)m_Format.GetCount();
+    for (unsigned i = 0; i < count; i++)
+    {
+      const CArcInfoEx &ai = (*ArcFormats)[(unsigned)m_Format.GetItemData(i)];
+      if (ai.Is_Tar())
+      {
+        m_Format.SetCurSel(i);
+        SaveOptionsInMem();
+        FormatChanged(true); // isChanged
+        SetMethod(tarMethodID);
+        SetLevel2();
+        EnableMultiCombo(IDC_COMPRESS_LEVEL);
+        return;
+      }
+    }
+  }
+
   {
     const CArcInfoEx &ai = Get_ArcInfoEx();
     if (ai.FindExtension(ext) >= 0)
@@ -1369,6 +1421,11 @@ bool CCompressDialog::OnCommand(unsigned code, unsigned itemID, LPARAM lParam)
       
       case IDC_COMPRESS_METHOD:
       {
+        if (Get_ArcInfoEx().Is_Tar())
+        {
+          SetLevel2();
+          EnableMultiCombo(IDC_COMPRESS_LEVEL);
+        }
         MethodChanged();
         SetSolidBlockSize();
         SetNumThreads();
@@ -1376,6 +1433,8 @@ bool CCompressDialog::OnCommand(unsigned code, unsigned itemID, LPARAM lParam)
         SetMemoryUsage();
         if (Get_ArcInfoEx().Flags_HashHandler())
           SetArchiveName2(false);
+        else if (Get_ArcInfoEx().Is_Tar())
+          SetTarFamilyArchiveName();
 
         return true;
       }
@@ -1452,20 +1511,39 @@ void CCompressDialog::SetArchiveName2(bool prevWasSFX)
   UString fileName;
   m_ArchivePath.GetText(fileName);
   const CArcInfoEx &prevArchiverInfo = (*ArcFormats)[m_PrevFormat];
-  if (prevArchiverInfo.Flags_KeepName() || Info.KeepName)
+  bool removedPrevExtension = false;
+  if (prevWasSFX)
   {
-    UString prevExtension;
-    if (prevWasSFX)
-      prevExtension = kExeExt;
+    if (fileName.Len() >= 4)
+      if (StringsAreEqualNoCase_Ascii(fileName.RightPtr(4), kExeExt))
+      {
+        fileName.DeleteFrom(fileName.Len() - 4);
+        removedPrevExtension = true;
+      }
+  }
+  else
+  {
+    if (prevArchiverInfo.Is_Tar())
+      removedPrevExtension = RemoveTarFamilySuffix(fileName);
     else
     {
+      UString prevExtension;
       prevExtension.Add_Dot();
-      prevExtension += prevArchiverInfo.GetMainExt();
+      if (prevArchiverInfo.Is_Zstd())
+        prevExtension += "zst";
+      else
+        prevExtension += prevArchiverInfo.GetMainExt();
+      const unsigned prevExtensionLen = prevExtension.Len();
+      if (fileName.Len() >= prevExtensionLen)
+        if (StringsAreEqualNoCase(fileName.RightPtr(prevExtensionLen), prevExtension))
+        {
+          fileName.DeleteFrom(fileName.Len() - prevExtensionLen);
+          removedPrevExtension = true;
+        }
     }
-    const unsigned prevExtensionLen = prevExtension.Len();
-    if (fileName.Len() >= prevExtensionLen)
-      if (StringsAreEqualNoCase(fileName.RightPtr(prevExtensionLen), prevExtension))
-        fileName.DeleteFrom(fileName.Len() - prevExtensionLen);
+
+    if (!removedPrevExtension)
+      RemoveKnownArchiveSuffix(fileName);
   }
   SetArchiveName(fileName);
 }
@@ -1480,7 +1558,7 @@ void CCompressDialog::SetArchiveName(const UString &name)
   Info.FormatIndex = (int)GetFormatIndex();
   const CArcInfoEx &ai = (*ArcFormats)[Info.FormatIndex];
   m_PrevFormat = Info.FormatIndex;
-  if (ai.Flags_KeepName())
+  if (ai.Flags_KeepName() && !ai.Is_Zstd())
   {
     fileName = OriginalFileName;
   }
@@ -1499,7 +1577,13 @@ void CCompressDialog::SetArchiveName(const UString &name)
   else
   {
     fileName.Add_Dot();
-    UString ext = ai.GetMainExt();
+    UString ext;
+    if (ai.Is_Tar())
+      ext = GetTarFamilyExtension();
+    else if (ai.Is_Zstd())
+      ext = "zst";
+    else
+      ext = ai.GetMainExt();
     if (ai.Flags_HashHandler())
     {
       UString estimatedName;
@@ -1540,6 +1624,153 @@ unsigned CCompressDialog::FindRegistryFormat_Always(const UString &name)
   }
 }
 
+int CCompressDialog::FindFormatIndexByName(const char *name)
+{
+  FOR_VECTOR (i, *ArcFormats)
+  {
+    const CArcInfoEx &ai = (*ArcFormats)[i];
+    if (ai.Name.IsEqualTo_Ascii_NoCase(name))
+      return (int)i;
+  }
+  return -1;
+}
+
+static bool IsTarFamilyMethodID(int methodID)
+{
+  return methodID == kZSTD
+      || methodID == kDeflate
+      || methodID == kBZip2
+      || methodID == kLZMA2
+      || methodID == kGnu
+      || methodID == kPosix;
+}
+
+static bool IsTarCompressedMethodID(int methodID)
+{
+  return methodID == kZSTD
+      || methodID == kDeflate
+      || methodID == kBZip2
+      || methodID == kLZMA2;
+}
+
+int CCompressDialog::GetTarFamilyMethodID()
+{
+  if (!Get_ArcInfoEx().Is_Tar())
+    return -1;
+  const int methodID = GetMethodID();
+  if (IsTarFamilyMethodID(methodID))
+    return methodID;
+  return FindFormatIndexByName("zstd") >= 0 ? kZSTD : kGnu;
+}
+
+bool CCompressDialog::IsTarZstdMethod()
+{
+  return GetTarFamilyMethodID() == kZSTD;
+}
+
+bool CCompressDialog::IsTarCompressedMethod()
+{
+  return Get_ArcInfoEx().Is_Tar() && IsTarCompressedMethodID(GetTarFamilyMethodID());
+}
+
+const char *CCompressDialog::GetTarFamilyExtension()
+{
+  switch (GetTarFamilyMethodID())
+  {
+    case kZSTD: return "tzs";
+    case kDeflate: return "tgz";
+    case kBZip2: return "tbz2";
+    case kLZMA2: return "txz";
+  }
+  return "tar";
+}
+
+unsigned CCompressDialog::GetFinalFormatIndex()
+{
+  const char *formatName = NULL;
+  switch (GetTarFamilyMethodID())
+  {
+    case kZSTD: formatName = "zstd"; break;
+    case kDeflate: formatName = "gzip"; break;
+    case kBZip2: formatName = "bzip2"; break;
+    case kLZMA2: formatName = "xz"; break;
+  }
+  if (formatName)
+  {
+    const int formatIndex = FindFormatIndexByName(formatName);
+    if (formatIndex >= 0)
+      return (unsigned)formatIndex;
+  }
+  return GetFormatIndex();
+}
+
+static bool RemoveSuffix_Ascii_NoCase(UString &s, const char *suffix)
+{
+  unsigned len = 0;
+  while (suffix[len] != 0)
+    len++;
+  if (s.Len() <= len)
+    return false;
+  if (!StringsAreEqualNoCase_Ascii(s.RightPtr(len), suffix))
+    return false;
+  s.DeleteFrom(s.Len() - len);
+  return true;
+}
+
+static bool RemoveTarFamilySuffix(UString &s)
+{
+  return
+      RemoveSuffix_Ascii_NoCase(s, ".tar.zst")
+   || RemoveSuffix_Ascii_NoCase(s, ".tzstd")
+   || RemoveSuffix_Ascii_NoCase(s, ".tzst")
+   || RemoveSuffix_Ascii_NoCase(s, ".tzs")
+   || RemoveSuffix_Ascii_NoCase(s, ".tar.gz")
+   || RemoveSuffix_Ascii_NoCase(s, ".tgz")
+   || RemoveSuffix_Ascii_NoCase(s, ".tar.bz2")
+   || RemoveSuffix_Ascii_NoCase(s, ".tbz2")
+   || RemoveSuffix_Ascii_NoCase(s, ".tbz")
+   || RemoveSuffix_Ascii_NoCase(s, ".tar.xz")
+   || RemoveSuffix_Ascii_NoCase(s, ".txz")
+   || RemoveSuffix_Ascii_NoCase(s, ".tar");
+}
+
+bool CCompressDialog::RemoveKnownArchiveSuffix(UString &fileName)
+{
+  if (RemoveTarFamilySuffix(fileName))
+    return true;
+
+  const int dotPos = GetExtDotPos(fileName);
+  if (dotPos < 0)
+    return false;
+
+  const UString ext = fileName.Ptr(dotPos + 1);
+  FOR_VECTOR(i, *ArcFormats)
+  {
+    const CArcInfoEx &ai = (*ArcFormats)[i];
+    if (ai.FindExtension(ext) >= 0)
+    {
+      fileName.DeleteFrom((unsigned)dotPos);
+      return true;
+    }
+  }
+  return false;
+}
+
+void CCompressDialog::SetTarFamilyArchiveName()
+{
+  UString fileName;
+  m_ArchivePath.GetText(fileName);
+  if (!RemoveKnownArchiveSuffix(fileName))
+  {
+    const int dotPos = GetExtDotPos(fileName);
+    if (dotPos >= 0)
+      return;
+  }
+  fileName.Add_Dot();
+  fileName += GetTarFamilyExtension();
+  m_ArchivePath.SetText(fileName);
+}
+
 
 NCompression::CFormatOptions &CCompressDialog::Get_FormatOptions()
 {
@@ -1574,6 +1805,27 @@ void CCompressDialog::SetLevel2()
   m_Level.ResetContent();
   const CFormatInfo &fi = g_Formats[GetStaticFormatIndex()];
   const CArcInfoEx &ai = Get_ArcInfoEx();
+  const int tarMethodID = GetTarFamilyMethodID();
+  UInt32 levelsMask = fi.LevelsMask;
+  if (ai.Is_Tar())
+  {
+    switch (tarMethodID)
+    {
+      case kZSTD:
+      case kLZMA2:
+        levelsMask = ((UInt32)1 << 10) - 1 - (1 << 0);
+        break;
+      case kDeflate:
+        levelsMask = (1 << 1) | (1 << 5) | (1 << 7) | (1 << 9);
+        break;
+      case kBZip2:
+        levelsMask = (1 << 1) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 9);
+        break;
+      default:
+        levelsMask = (1 << 0);
+        break;
+    }
+  }
   UInt32 level = 5;
   {
     int index = FindRegistryFormat(ai.Name);
@@ -1589,11 +1841,11 @@ void CCompressDialog::SetLevel2()
     }
   }
   
-  const bool isZstd = ai.Is_Zstd();
+  const bool isZstd = ai.Is_Zstd() || tarMethodID == kZSTD;
 
   for (unsigned i = 0; i < sizeof(UInt32) * 8; i++)
   {
-    const UInt32 mask = fi.LevelsMask >> i;
+    const UInt32 mask = levelsMask >> i;
     // if (mask == 0) break;
     if (mask & 1)
     {
@@ -1648,6 +1900,8 @@ void CCompressDialog::SetMethod2(int keepMethodId)
       defaultMethod = fo.Method;
     }
   }
+  if (ai.Is_Tar())
+    defaultMethod.Empty();
   const bool isSfx = IsSFX();
   bool weUseSameMethod = false;
 
@@ -1661,6 +1915,19 @@ void CCompressDialog::SetMethod2(int keepMethodId)
     {
       methodID = fi.MethodIDs[m];
       method = kMethodsNames[methodID];
+      if (ai.Is_Tar())
+      {
+        const char *formatName = NULL;
+        switch (methodID)
+        {
+          case kZSTD: formatName = "zstd"; break;
+          case kDeflate: formatName = "gzip"; break;
+          case kBZip2: formatName = "bzip2"; break;
+          case kLZMA2: formatName = "xz"; break;
+        }
+        if (formatName && FindFormatIndexByName(formatName) < 0)
+          continue;
+      }
       if (is7z)
       if (methodID == kCopy
           || methodID == kDeflate
@@ -1683,6 +1950,21 @@ void CCompressDialog::SetMethod2(int keepMethodId)
         continue;
 
     AString s (method);
+    if (ai.Is_Tar())
+    {
+      if (methodID == kZSTD)
+        s = "Zstandard (tzs)";
+      else if (methodID == kDeflate)
+        s = "GZip (tgz)";
+      else if (methodID == kBZip2)
+        s = "BZip2 (tbz2)";
+      else if (methodID == kLZMA2)
+        s = "XZ / LZMA2 (txz)";
+      else if (methodID == kGnu)
+        s = "GNU (tar)";
+      else if (methodID == kPosix)
+        s = "POSIX (tar)";
+    }
     int writtenMethodId = methodID;
     if (m == 0)
     {
@@ -1883,6 +2165,8 @@ void CCompressDialog::SetDictionary2()
   
   const int methodID = GetMethodID();
   const UInt32 level = GetLevel2();
+  if (IsTarCompressedMethod())
+    return;
 
   {
     RECT r, rLabel;
@@ -2232,6 +2516,8 @@ void CCompressDialog::SetOrder2()
   const int methodID = GetMethodID();
   const UInt32 level = GetLevel2();
   if (methodID < 0)
+    return;
+  if (IsTarCompressedMethod())
     return;
   
   switch (methodID)

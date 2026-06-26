@@ -99,7 +99,7 @@ DECLARE_AND_SET_CLIENT_VERSION_VAR
 static void ErrorMessage(LPCWSTR message)
 {
   if (!g_DisableUserQuestions)
-    MessageBoxW(NULL, message, L"7-Zip", MB_ICONERROR | MB_OK);
+    MessageBoxW(NULL, message, L"WinZST", MB_ICONERROR | MB_OK);
 }
 
 static void ErrorMessage(const char *s)
@@ -112,7 +112,7 @@ static void ErrorLangMessage(UINT resourceID)
   ErrorMessage(LangString(resourceID));
 }
 
-static const char * const kNoFormats = "7-Zip cannot find the code that works with archives.";
+static const char * const kNoFormats = "WinZST cannot find the code that works with archives.";
 
 static int ShowMemErrorMessage()
 {
@@ -145,7 +145,7 @@ static int Main2()
   #endif
   if (commandStrings.Size() == 0)
   {
-    MessageBoxW(NULL, L"Specify command", L"7-Zip", 0);
+    MessageBoxW(NULL, L"Specify command", L"WinZST", 0);
     return 0;
   }
 
@@ -171,7 +171,7 @@ static int Main2()
     if (!s.IsEmpty())
     {
       if (!g_DisableUserQuestions)
-        MessageBoxW(NULL, s, L"7-Zip", MB_ICONERROR);
+        MessageBoxW(NULL, s, L"WinZST", MB_ICONERROR);
     }
   
   }
@@ -187,7 +187,7 @@ static int Main2()
     #ifdef Z7_EXTERNAL_CODECS
     if (!codecs->MainDll_ErrorPath.IsEmpty())
     {
-      UString s ("7-Zip cannot load module: ");
+      UString s ("WinZST cannot load module: ");
       s += fs2us(codecs->MainDll_ErrorPath);
       throw s;
     }

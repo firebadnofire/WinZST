@@ -57,7 +57,7 @@ using namespace NFind;
 
 static void MessageBox_Error_Global(HWND wnd, const wchar_t *message)
 {
-  ::MessageBoxW(wnd, message, L"7-Zip", MB_ICONERROR);
+  ::MessageBoxW(wnd, message, L"WinZST", MB_ICONERROR);
 }
 
 #ifdef USE_MY_BROWSE_DIALOG

@@ -1,0 +1,487 @@
+name: Release Packaging
+
+'on':
+  push:
+    tags:
+      - 'v*'
+
+env:
+  PORTABLE_ZIP_PATH: dist/releases/winzst-windows-amd64-portable.zip
+  RELEASE_BODY: |
+    Automated Windows release assets for WinZST.
+
+    Assets:
+    - Windows portable: `winzst-windows-amd64-portable.zip`
+
+    Notes:
+    - WinZST is a fork of 7-Zip focused on first-class tar + Zstandard archive workflows.
+    - Preferred archive format: `.tzs`, meaning tar compressed with Zstandard.
+    - Installer and shell integration are intentionally deferred until WinZST has a fully separate Windows installer identity.
+
+jobs:
+  package:
+    name: Package Windows Release
+    if: ${{ startsWith(forgejo.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ${{ forgejo.token }}
+        run: |
+          set -euo pipefail
+
+          for tool in base64 git; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "Missing required checkout tool: ${tool}" >&2
+              exit 1
+            fi
+          done
+
+          server_url="${FORGEJO_SERVER_URL:-${GITHUB_SERVER_URL:-}}"
+          repository="${FORGEJO_REPOSITORY:-${GITHUB_REPOSITORY:-}}"
+          ref="${FORGEJO_REF:-${GITHUB_REF:-}}"
+          sha="${FORGEJO_SHA:-${GITHUB_SHA:-}}"
+          token="${FORGEJO_TOKEN:-${GITHUB_TOKEN:-}}"
+
+          if [ -z "$server_url" ]; then
+            echo "Missing repository server URL." >&2
+            exit 1
+          fi
+
+          if [ -z "$repository" ]; then
+            echo "Missing repository name." >&2
+            exit 1
+          fi
+
+          case "$server_url" in
+            https://*) ;;
+            *)
+              echo "Repository server URL must use https: ${server_url}" >&2
+              exit 1
+              ;;
+          esac
+
+          remote_url="${server_url%/}/${repository}.git"
+          git init .
+          git remote remove origin >/dev/null 2>&1 || true
+          git remote add origin "$remote_url"
+
+          git_fetch() {
+            if [ -n "$token" ]; then
+              auth_header="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+              git -c "http.${remote_url}.extraheader=AUTHORIZATION: basic ${auth_header}" "$@"
+            else
+              git "$@"
+            fi
+          }
+
+          if [ -n "$ref" ]; then
+            git_fetch fetch --force --tags --prune --depth=1 origin "+${ref}:${ref}"
+            git checkout --force --detach "$ref"
+          elif [ -n "$sha" ]; then
+            git_fetch fetch --force --tags --prune --depth=1 origin "$sha"
+            git checkout --force --detach "$sha"
+          else
+            echo "Missing both ref and sha for checkout." >&2
+            exit 1
+          fi
+
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth=1
+
+      - name: Verify Windows build prerequisites
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $requiredCommands = @('git', 'powershell')
+          foreach ($commandName in $requiredCommands) {
+            if (-not (Get-Command $commandName -ErrorAction SilentlyContinue)) {
+              throw "Missing required command: $commandName"
+            }
+          }
+
+          $vsWherePath = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vsWherePath)) {
+            throw "vswhere.exe was not found at '$vsWherePath'. Install Visual Studio 2022 Build Tools on the Windows runner."
+          }
+
+          & $vsWherePath `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -version '[17.0,18.0)' `
+            -property installationPath
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "vswhere failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Build Alone2 CLI
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build-helpers\build.ps1 -Target Alone2 -CleanFirst
+
+      - name: Validate Alone2 CLI output
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = '.\CPP\7zip\Bundles\Alone2\x64\winzst.exe'
+          if (-not (Test-Path -LiteralPath $path)) {
+            throw "Expected CLI output was not found: $path"
+          }
+          Get-Item -LiteralPath $path | Format-List FullName, Length, LastWriteTime
+
+      - name: Build GUI
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build-helpers\build.ps1 -Target Gui -CleanFirst
+
+      - name: Validate GUI output
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = '.\CPP\7zip\UI\GUI\x64\WinZSTG.exe'
+          if (-not (Test-Path -LiteralPath $path)) {
+            throw "Expected GUI output was not found: $path"
+          }
+          Get-Item -LiteralPath $path | Format-List FullName, Length, LastWriteTime
+
+      - name: Build File Manager
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build-helpers\build.ps1 -Target Fm -CleanFirst
+
+      - name: Validate File Manager output
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = '.\CPP\7zip\Bundles\Fm\x64\WinZSTFM.exe'
+          if (-not (Test-Path -LiteralPath $path)) {
+            throw "Expected file manager output was not found: $path"
+          }
+          Get-Item -LiteralPath $path | Format-List FullName, Length, LastWriteTime
+
+      - name: Run release smoke tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $exe = '.\CPP\7zip\Bundles\Alone2\x64\winzst.exe'
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Missing smoke-test executable: $exe"
+          }
+
+          & $exe i
+          if ($LASTEXITCODE -ne 0) {
+            throw "Basic info command failed with exit code $LASTEXITCODE."
+          }
+
+          Remove-Item .\build-test\release-smoke -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force .\build-test\release-smoke\payload\subdir | Out-Null
+
+          'alpha' | Out-File .\build-test\release-smoke\payload\a.txt -Encoding utf8
+          'beta' | Out-File .\build-test\release-smoke\payload\subdir\b.txt -Encoding utf8
+          1..50000 | ForEach-Object { "WinZST release smoke compression line $_" } | Out-File .\build-test\release-smoke\payload\big.txt -Encoding utf8
+
+          $requiredArchives = @(
+            '.\build-test\release-smoke\payload.zip',
+            '.\build-test\release-smoke\payload.7z',
+            '.\build-test\release-smoke\payload.tar',
+            '.\build-test\release-smoke\payload.tzs'
+          )
+
+          foreach ($archivePath in $requiredArchives) {
+            & $exe a $archivePath .\build-test\release-smoke\payload
+            if ($LASTEXITCODE -ne 0) {
+              throw "Archive creation failed for $archivePath with exit code $LASTEXITCODE."
+            }
+
+            & $exe t $archivePath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Archive test failed for $archivePath with exit code $LASTEXITCODE."
+            }
+          }
+
+          $infoOutput = (& $exe i | Out-String)
+          $optionalFormats = @(
+            @{ Extension = 'tgz'; Pattern = 'tgz|tar\.gz' },
+            @{ Extension = 'tbz2'; Pattern = 'tbz2|tar\.bz2' },
+            @{ Extension = 'txz'; Pattern = 'txz|tar\.xz' }
+          )
+
+          foreach ($format in $optionalFormats) {
+            if ($infoOutput -match $format.Pattern) {
+              $archivePath = ".\build-test\release-smoke\payload.$($format.Extension)"
+              & $exe a $archivePath .\build-test\release-smoke\payload
+              if ($LASTEXITCODE -ne 0) {
+                throw "Optional archive creation failed for $archivePath with exit code $LASTEXITCODE."
+              }
+
+              & $exe t $archivePath
+              if ($LASTEXITCODE -ne 0) {
+                throw "Optional archive test failed for $archivePath with exit code $LASTEXITCODE."
+              }
+            }
+            else {
+              Write-Host "Skipping optional smoke test for .$($format.Extension); format not reported by 'winzst.exe i'."
+            }
+          }
+
+          Remove-Item .\build-test\release-smoke\out -Recurse -Force -ErrorAction SilentlyContinue
+          & $exe x .\build-test\release-smoke\payload.tzs "-o.\build-test\release-smoke\out"
+          if ($LASTEXITCODE -ne 0) {
+            throw "tzs extraction failed with exit code $LASTEXITCODE."
+          }
+
+          if (-not (Test-Path '.\build-test\release-smoke\out\payload\a.txt')) {
+            throw 'tzs extraction did not produce expected payload\a.txt'
+          }
+
+          if (Get-ChildItem '.\build-test\release-smoke\out' -Recurse -Filter *.tar | Select-Object -First 1) {
+            throw 'tzs extraction leaked an intermediate tar file'
+          }
+
+      - name: Package portable zip
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $repoRoot = (Get-Location).Path
+          $portableRoot = Join-Path $repoRoot 'dist\windows\amd64\portable'
+          $releaseDir = Join-Path $repoRoot 'dist\releases'
+          $releaseZip = Join-Path $repoRoot $env:PORTABLE_ZIP_PATH
+
+          Remove-Item $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $releaseZip -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+
+          $requiredFiles = @(
+            @{ Source = '.\CPP\7zip\Bundles\Alone2\x64\winzst.exe'; Destination = 'winzst.exe' },
+            @{ Source = '.\CPP\7zip\Bundles\Fm\x64\WinZSTFM.exe'; Destination = 'WinZSTFM.exe' },
+            @{ Source = '.\CPP\7zip\UI\GUI\x64\WinZSTG.exe'; Destination = 'WinZSTG.exe' }
+          )
+
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $file.Source)) {
+              throw "Required release file is missing: $($file.Source)"
+            }
+            Copy-Item -LiteralPath $file.Source -Destination (Join-Path $portableRoot $file.Destination) -Force
+          }
+
+          $runtimePatterns = @('*.dll', '*.lng', '*.mui')
+          $runtimeDirs = @('Codecs', 'Formats', 'Plugins', 'Lang')
+          $sourceDirs = $requiredFiles.Source | ForEach-Object {
+            Split-Path -Parent (Resolve-Path -LiteralPath $_)
+          } | Sort-Object -Unique
+
+          foreach ($sourceDir in $sourceDirs) {
+            foreach ($pattern in $runtimePatterns) {
+              Get-ChildItem -LiteralPath $sourceDir -File -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $portableRoot $_.Name) -Force
+              }
+            }
+
+            foreach ($directoryName in $runtimeDirs) {
+              $candidate = Join-Path $sourceDir $directoryName
+              if (Test-Path -LiteralPath $candidate) {
+                Copy-Item -LiteralPath $candidate -Destination (Join-Path $portableRoot $directoryName) -Recurse -Force
+              }
+            }
+          }
+
+          foreach ($docPath in @('.\README.md', '.\LICENSE')) {
+            if (Test-Path -LiteralPath $docPath) {
+              Copy-Item -LiteralPath $docPath -Destination (Join-Path $portableRoot (Split-Path -Leaf $docPath)) -Force
+            }
+          }
+
+          if (-not (Test-Path -LiteralPath (Join-Path $portableRoot 'winzst.exe'))) {
+            throw 'Portable package staging is missing winzst.exe.'
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $portableRoot 'WinZSTFM.exe'))) {
+            throw 'Portable package staging is missing WinZSTFM.exe.'
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $portableRoot 'WinZSTG.exe'))) {
+            throw 'Portable package staging is missing WinZSTG.exe.'
+          }
+
+          Compress-Archive -Path (Join-Path $portableRoot '*') -DestinationPath $releaseZip -Force
+
+      - name: Validate packaged zip contents
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          $releaseZip = Join-Path (Get-Location).Path $env:PORTABLE_ZIP_PATH
+          if (-not (Test-Path -LiteralPath $releaseZip)) {
+            throw "Portable zip was not created: $releaseZip"
+          }
+
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($releaseZip)
+          try {
+            $entries = $zip.Entries | Select-Object -ExpandProperty FullName
+            Write-Host 'Portable zip contents:'
+            $entries | Sort-Object | ForEach-Object { Write-Host $_ }
+
+            $requiredEntries = @('winzst.exe', 'WinZSTFM.exe', 'WinZSTG.exe')
+            foreach ($entry in $requiredEntries) {
+              if ($entries -notcontains $entry) {
+                throw "Portable zip is missing required entry: $entry"
+              }
+            }
+
+            $forbiddenEntries = @('7zz.exe', '7zFM.exe', '7zG.exe')
+            foreach ($entry in $forbiddenEntries) {
+              if ($entries -contains $entry) {
+                throw "Portable zip accidentally contains forbidden primary launcher: $entry"
+              }
+            }
+          }
+          finally {
+            $zip.Dispose()
+          }
+
+      - name: Publish release asset to current server
+        shell: pwsh
+        env:
+          FORGEJO_TOKEN: ${{ forgejo.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $serverUrl = if ($env:FORGEJO_SERVER_URL) { $env:FORGEJO_SERVER_URL } else { $env:GITHUB_SERVER_URL }
+          $repository = if ($env:FORGEJO_REPOSITORY) { $env:FORGEJO_REPOSITORY } else { $env:GITHUB_REPOSITORY }
+          $apiUrl = if ($env:FORGEJO_API_URL) { $env:FORGEJO_API_URL } else { $env:GITHUB_API_URL }
+          $tag = if ($env:FORGEJO_REF_NAME) { $env:FORGEJO_REF_NAME } elseif ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { '' }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $rawRef = if ($env:FORGEJO_REF) { $env:FORGEJO_REF } else { $env:GITHUB_REF }
+            $tag = $rawRef -replace '^refs/tags/', ''
+          }
+          $token = if ($env:FORGEJO_TOKEN) { $env:FORGEJO_TOKEN } else { $env:GITHUB_TOKEN }
+          $releaseZip = Join-Path (Get-Location).Path $env:PORTABLE_ZIP_PATH
+          $assetName = Split-Path -Leaf $releaseZip
+          $releaseName = "WinZST $tag"
+          $releaseBody = $env:RELEASE_BODY
+
+          if ([string]::IsNullOrWhiteSpace($serverUrl)) {
+            throw 'Missing repository server URL.'
+          }
+          if ([string]::IsNullOrWhiteSpace($repository)) {
+            throw 'Missing repository name.'
+          }
+          if ([string]::IsNullOrWhiteSpace($apiUrl)) {
+            throw 'Missing repository API URL.'
+          }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw 'Missing release tag.'
+          }
+          if ([string]::IsNullOrWhiteSpace($token)) {
+            throw 'Missing workflow token for release publishing.'
+          }
+          if (-not (Test-Path -LiteralPath $releaseZip)) {
+            throw "Release asset does not exist: $releaseZip"
+          }
+          if (-not $apiUrl.StartsWith('https://')) {
+            throw "Repository API URL must use https: $apiUrl"
+          }
+
+          $owner, $repo = $repository.Split('/', 2)
+          $headers = @{
+            Authorization = "token $token"
+          }
+
+          $releasePayload = @{
+            tag_name = $tag
+            name = $releaseName
+            body = $releaseBody
+            draft = $false
+            prerelease = $false
+          }
+
+          function Merge-Headers {
+            param(
+              [hashtable]$Base,
+              [hashtable]$Extra
+            )
+
+            $merged = @{}
+            foreach ($key in $Base.Keys) {
+              $merged[$key] = $Base[$key]
+            }
+            foreach ($key in $Extra.Keys) {
+              $merged[$key] = $Extra[$key]
+            }
+            return $merged
+          }
+
+          $isGitHub = $serverUrl -match '(^https://github\.com$)|(^https://.*github.*$)'
+
+          if ($isGitHub) {
+            $headers['Accept'] = 'application/vnd.github+json'
+            $headers['X-GitHub-Api-Version'] = '2022-11-28'
+
+            $releaseUri = "$apiUrl/repos/$owner/$repo/releases/tags/$tag"
+            try {
+              $release = Invoke-RestMethod -Method Get -Uri $releaseUri -Headers $headers
+            }
+            catch {
+              $statusCode = $_.Exception.Response.StatusCode.value__
+              if ($statusCode -eq 404) {
+                $release = Invoke-RestMethod -Method Post -Uri "$apiUrl/repos/$owner/$repo/releases" -Headers (Merge-Headers -Base $headers -Extra @{ 'Content-Type' = 'application/json' }) -Body ($releasePayload | ConvertTo-Json -Depth 4)
+              }
+              else {
+                throw
+              }
+            }
+
+            $releaseId = $release.id
+            $release = Invoke-RestMethod -Method Patch -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId" -Headers (Merge-Headers -Base $headers -Extra @{ 'Content-Type' = 'application/json' }) -Body ($releasePayload | ConvertTo-Json -Depth 4)
+            $releaseId = $release.id
+
+            $existingAssets = Invoke-RestMethod -Method Get -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId/assets" -Headers $headers
+            $existingAsset = $existingAssets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+            if ($existingAsset) {
+              Invoke-RestMethod -Method Delete -Uri "$apiUrl/repos/$owner/$repo/releases/assets/$($existingAsset.id)" -Headers $headers | Out-Null
+            }
+
+            $uploadUri = "https://uploads.github.com/repos/$owner/$repo/releases/$releaseId/assets?name=$([uri]::EscapeDataString($assetName))"
+            Invoke-RestMethod -Method Post -Uri $uploadUri -Headers (Merge-Headers -Base $headers -Extra @{ 'Content-Type' = 'application/octet-stream' }) -InFile $releaseZip | Out-Null
+          }
+          else {
+            $releaseUri = "$apiUrl/repos/$owner/$repo/releases/tags/$tag"
+            try {
+              $release = Invoke-RestMethod -Method Get -Uri $releaseUri -Headers $headers
+            }
+            catch {
+              $statusCode = $_.Exception.Response.StatusCode.value__
+              if ($statusCode -eq 404) {
+                $release = Invoke-RestMethod -Method Post -Uri "$apiUrl/repos/$owner/$repo/releases" -Headers (Merge-Headers -Base $headers -Extra @{ 'Content-Type' = 'application/json' }) -Body ($releasePayload | ConvertTo-Json -Depth 4)
+              }
+              else {
+                throw
+              }
+            }
+
+            $releaseId = $release.id
+            $release = Invoke-RestMethod -Method Patch -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId" -Headers (Merge-Headers -Base $headers -Extra @{ 'Content-Type' = 'application/json' }) -Body ($releasePayload | ConvertTo-Json -Depth 4)
+            $releaseId = $release.id
+
+            $existingAssets = Invoke-RestMethod -Method Get -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId/assets" -Headers $headers
+            $existingAsset = $existingAssets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+            if ($existingAsset) {
+              Invoke-RestMethod -Method Delete -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId/assets/$($existingAsset.id)" -Headers $headers | Out-Null
+            }
+
+            $form = @{
+              attachment = Get-Item -LiteralPath $releaseZip
+            }
+            Invoke-RestMethod -Method Post -Uri "$apiUrl/repos/$owner/$repo/releases/$releaseId/assets?name=$([uri]::EscapeDataString($assetName))" -Headers $headers -Form $form | Out-Null
+          }

@@ -50,7 +50,7 @@ typedef enum {
   #define Z7_64BIT_INSTALLER 1
 #endif
 
-#define k_7zip_with_Ver_base L"7-Zip " LLL(MY_VERSION)
+#define k_7zip_with_Ver_base L"WinZST " LLL(MY_VERSION)
 
 #ifdef Z7_64BIT_INSTALLER
 
@@ -75,7 +75,7 @@ typedef enum {
 
 static LPCWSTR const k_7zip_with_Ver_Uninstall = k_7zip_with_Ver L" Uninstall";
 
-static LPCWSTR const k_Reg_Software_7zip = L"Software\\7-Zip";
+static LPCWSTR const k_Reg_Software_7zip = L"Software\\WinZST";
 
 static LPCWSTR const k_Reg_Path = L"Path";
  
@@ -101,7 +101,7 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 #endif
 #endif
 
-#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
+#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-0001000A0000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";
@@ -404,12 +404,12 @@ static void SetShellProgramsGroup(HWND hwndOwner)
       for (k = 0; k < 2; k++)
       {
         CpyAscii(link + baseLen, k == 0 ?
-            "7-Zip File Manager.lnk" :
-            "7-Zip Help.lnk");
+            "WinZST File Manager.lnk" :
+            "WinZST README.lnk");
         wcscpy(destPath, path);
         CatAscii(destPath, k == 0 ?
-            "7zFM.exe" :
-            "7-zip.chm");
+            "WinZSTFM.exe" :
+            "README.md");
         
         if (CreateShellLink(link, destPath) == S_OK)
         {
@@ -441,9 +441,9 @@ static LPCSTR const k_ShellEx_Items[] =
 
 static LPCWSTR const k_Shell_Approved = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
 
-static LPCWSTR const k_AppPaths_7zFm = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\7zFM.exe";
+static LPCWSTR const k_AppPaths_7zFm = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinZSTFM.exe";
 #define k_REG_Uninstall L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
-static LPCWSTR const k_Uninstall_7zip = k_REG_Uninstall L"7-Zip";
+static LPCWSTR const k_Uninstall_7zip = k_REG_Uninstall L"WinZST";
 
 
 static void RemoveQuotes(wchar_t *s)
@@ -484,7 +484,7 @@ static void WriteCLSID(void)
         {
           WCHAR destPath[MAX_PATH];
           CpyAscii(destPath, k_ShellEx_Items[i]);
-          CatAscii(destPath, "\\7-Zip");
+          CatAscii(destPath, "\\WinZST");
           
           MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, destPath);
         }
@@ -521,7 +521,7 @@ static void WriteCLSID(void)
         {
           WCHAR destPath[MAX_PATH];
           CpyAscii(destPath, k_ShellEx_Items[i]);
-          CatAscii(destPath, "\\7-Zip");
+          CatAscii(destPath, "\\WinZST");
           
           MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, destPath);
         }
@@ -545,7 +545,7 @@ static void WriteCLSID(void)
   if (MyRegistry_QueryString2(HKEY_LOCAL_MACHINE, k_AppPaths_7zFm, NULL, s))
   {
     // RemoveQuotes(s);
-    if (AreEqual_Path_PrefixName(s, path, L"7zFM.exe"))
+    if (AreEqual_Path_PrefixName(s, path, L"WinZSTFM.exe"))
       MyRegistry_DeleteKey(HKEY_LOCAL_MACHINE, k_AppPaths_7zFm);
   }
 
@@ -692,14 +692,13 @@ static const char * const k_Names =
   " descript.ion"
   " History.txt"
   " License.txt"
-  " readme.txt"
-  " 7-zip.chm"
+  " README.md"
   " 7z.sfx"
   " 7zCon.sfx"
-  " 7z.exe"
-  " 7zG.exe"
+  " winzst.exe"
+  " WinZSTG.exe"
   " 7z.dll"
-  " 7zFM.exe"
+  " WinZSTFM.exe"
   #ifdef USE_7ZIP_32_DLL
   " 7-zip32.dll"
   #endif

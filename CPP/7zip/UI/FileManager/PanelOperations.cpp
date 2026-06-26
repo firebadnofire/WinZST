@@ -88,7 +88,7 @@ HRESULT CThreadFolderOperations::DoOperation(CPanel &panel, const UString &progr
   }
 
   MainWindow = panel._mainWindow; // panel.GetParent()
-  MainTitle = "7-Zip"; // LangString(IDS_APP_TITLE);
+  MainTitle = "WinZST"; // LangString(IDS_APP_TITLE);
   MainAddTitle = progressTitle + L' ';
 
   RINOK(Create(progressTitle, MainWindow))

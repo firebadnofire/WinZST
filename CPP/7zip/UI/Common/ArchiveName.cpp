@@ -18,7 +18,9 @@ using namespace NFile;
 
 
 static const char * const g_ArcExts =
-        "7z"
+        "tzs"
+  "\0"  "tar.zst"
+  "\0"  "7z"
   "\0"  "zip"
   "\0"  "tar"
   "\0"  "wim"

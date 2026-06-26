@@ -79,7 +79,7 @@ static CFSTR const kMainDll =
 
 #ifdef _WIN32
 
-static LPCTSTR const kRegistryPath = TEXT("Software") TEXT(STRING_PATH_SEPARATOR) TEXT("7-zip");
+static LPCTSTR const kRegistryPath = TEXT("Software") TEXT(STRING_PATH_SEPARATOR) TEXT("WinZST");
 static LPCWSTR const kProgramPathValue = L"Path";
 static LPCWSTR const kProgramPath2Value = L"Path"
   #ifdef _WIN64
@@ -705,7 +705,7 @@ HRESULT CCodecs::LoadDll(const FString &dllPath, bool needCheckDll, bool *loaded
     {
       CCodecError &error = Errors.AddNew();
       error.Path = dllPath;
-      error.Message = "no 7-Zip code";
+      error.Message = "no WinZST code";
     }
     */
   }

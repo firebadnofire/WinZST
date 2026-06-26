@@ -81,6 +81,7 @@ public:
     kTest,
     kCompress,
     kCompressEmail,
+    kCompressToTzs,
     kCompressTo7z,
     kCompressTo7zEmail,
     kCompressToZip,

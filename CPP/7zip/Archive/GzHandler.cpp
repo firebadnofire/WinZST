@@ -11,11 +11,13 @@
 #include "../../Common/StringConvert.h"
 
 #include "../../Windows/PropVariantUtils.h"
+#include "../../Windows/ErrorMsg.h"
 #include "../../Windows/TimeUtils.h"
 
 #include "../Common/ProgressUtils.h"
 #include "../Common/RegisterArc.h"
 #include "../Common/StreamUtils.h"
+#include "../Common/FileStreams.h"
 
 #include "../Compress/CopyCoder.h"
 #include "../Compress/DeflateDecoder.h"
@@ -24,6 +26,7 @@
 #include "Common/HandlerOut.h"
 #include "Common/InStreamWithCRC.h"
 #include "Common/OutStreamWithCRC.h"
+#include "Common/TarWrapUpdate.h"
 
 #define Get32(p) GetUi32(p)
 
@@ -34,6 +37,12 @@ using namespace NDeflate;
 
 namespace NArchive {
 namespace NGz {
+
+static const char * const kTarGzSuffixes[] =
+{
+    ".tar.gz"
+  , ".tgz"
+};
 
   static const Byte kSignature_0 = 0x1F;
   static const Byte kSignature_1 = 0x8B;
@@ -446,8 +455,9 @@ HRESULT CItem::WriteFooter(ISequentialOutStream *stream)
   return WriteStream(stream, buf, 8);
 }
 
-Z7_CLASS_IMP_CHandler_IInArchive_3(
+Z7_CLASS_IMP_CHandler_IInArchive_4(
   IArchiveOpenSeq,
+  IInArchiveGetStream,
   IOutArchive,
   ISetProperties
 )
@@ -461,11 +471,13 @@ Z7_CLASS_IMP_CHandler_IInArchive_3(
   bool _packSize_Defined;
   bool _unpackSize_Defined;
   bool _numStreams_Defined;
+  bool _tarMode;
 
   UInt64 _packSize;
   UInt64 _unpackSize; // real unpack size (NOT from footer)
   UInt64 _numStreams;
   UInt64 _headerSize; // only start header (without footer)
+  UString _subFileName;
   
   CMyComPtr<IInStream> _stream;
   CMyComPtr2<ICompressCoder, NDecoder::CCOMCoder> _decoder;
@@ -473,9 +485,13 @@ Z7_CLASS_IMP_CHandler_IInArchive_3(
   CSingleMethodProps _props;
   CHandlerTimeOptions _timeOptions;
 
+  HRESULT DecodeToOutput(ISequentialOutStream *realOutStream, ICompressProgressInfo *progress, Int32 &opRes);
+  friend class CDecodedTempInStream;
+
 public:
   CHandler():
-      _isArc(false)
+      _isArc(false),
+      _tarMode(false)
       {}
   
   void CreateDecoder()
@@ -532,6 +548,10 @@ Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
         prop = s;
       }
       break;
+    case kpidMainSubfile:
+      if (_tarMode)
+        prop = (UInt32)0;
+      break;
     default: break;
   }
   prop.Detach(value);
@@ -553,6 +573,11 @@ Z7_COM7F_IMF(CHandler::GetProperty(UInt32 /* index */, PROPID propID, PROPVARIAN
   switch (propID)
   {
     case kpidPath:
+      if (_tarMode && !_subFileName.IsEmpty())
+      {
+        prop = _subFileName;
+        break;
+      }
       if (_item.NameIsPresent())
         prop = MultiByteToUnicodeString(_item.Name, CP_ACP);
       break;
@@ -613,10 +638,26 @@ Z7_COM7F_IMF(CCompressProgressInfoImp::SetRatioInfo(const UInt64 *inSize, const 
 /*
 */
 
-Z7_COM7F_IMF(CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback *))
+Z7_COM7F_IMF(CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback *callback))
 {
   COM_TRY_BEGIN
+  UString subFileName;
+  if (callback)
+  {
+    CMyComPtr<IArchiveOpenVolumeCallback> volumeCallback;
+    callback->QueryInterface(IID_IArchiveOpenVolumeCallback, (void **)&volumeCallback);
+    if (volumeCallback)
+    {
+      NCOM::CPropVariant prop;
+      if (volumeCallback->GetProperty(kpidName, &prop) == S_OK
+          && prop.vt == VT_BSTR
+          && prop.bstrVal != NULL)
+        NTarWrap::GetTarSubFileName(prop.bstrVal, kTarGzSuffixes, Z7_ARRAY_SIZE(kTarGzSuffixes), subFileName);
+    }
+  }
   RINOK(OpenSeq(stream))
+  _tarMode = !subFileName.IsEmpty();
+  _subFileName = subFileName;
   _isArc = false;
   UInt64 endPos;
   RINOK(stream->Seek(-8, STREAM_SEEK_END, &endPos))
@@ -662,6 +703,8 @@ Z7_COM7F_IMF(CHandler::Close())
 
   _packSize = 0;
   _headerSize = 0;
+  _tarMode = false;
+  _subFileName.Empty();
   
   _stream.Release();
   if (_decoder)
@@ -669,40 +712,13 @@ Z7_COM7F_IMF(CHandler::Close())
   return S_OK;
 }
 
-Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
-    Int32 testMode, IArchiveExtractCallback *extractCallback))
+HRESULT CHandler::DecodeToOutput(ISequentialOutStream *realOutStream, ICompressProgressInfo *progress, Int32 &opRes)
 {
-  COM_TRY_BEGIN
-  if (numItems == 0)
-    return S_OK;
-  if (numItems != (UInt32)(Int32)-1 && (numItems != 1 || indices[0] != 0))
-    return E_INVALIDARG;
-
-  if (_packSize_Defined)
-    RINOK(extractCallback->SetTotal(_packSize))
-  // UInt64 currentTotalPacked = 0;
-  // RINOK(extractCallback->SetCompleted(&currentTotalPacked));
-  Int32 retResult;
- {
-  CMyComPtr<ISequentialOutStream> realOutStream;
-  const Int32 askMode = testMode ?
-      NExtract::NAskMode::kTest :
-      NExtract::NAskMode::kExtract;
-  RINOK(extractCallback->GetStream(0, &realOutStream, askMode))
-  if (!testMode && !realOutStream)
-    return S_OK;
-
-  RINOK(extractCallback->PrepareOperation(askMode))
-
   CreateDecoder();
 
   CMyComPtr2_Create<ISequentialOutStream, COutStreamWithCRC> outStream;
   outStream->SetStream(realOutStream);
   outStream->Init();
-  // realOutStream.Release();
-
-  CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
-  lps->Init(extractCallback, true);
 
   bool needReadFirstItem = _needSeekToStart;
   
@@ -712,7 +728,6 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
       return E_FAIL;
     RINOK(InStream_SeekToBegin(_stream))
     _decoder->InitInStream(true);
-    // printf("\nSeek");
   }
   else
     _needSeekToStart = true;
@@ -720,23 +735,18 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
   bool firstItem = true;
 
   UInt64 packSize = _decoder->GetInputProcessedSize();
-  // printf("\npackSize = %d", (unsigned)packSize);
-
   UInt64 unpackedSize = 0;
   UInt64 numStreams = 0;
 
   bool crcError = false;
-
   HRESULT result = S_OK;
 
   try {
   
   for (;;)
   {
-    lps->InSize = packSize;
-    lps->OutSize = unpackedSize;
-
-    RINOK(lps->SetCur())
+    if (progress)
+      RINOK(progress->SetRatioInfo(&packSize, &unpackedSize))
 
     CItem item;
     
@@ -775,7 +785,7 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     const UInt64 startOffset = outStream->GetSize();
     outStream->InitCRC();
 
-    result = _decoder->CodeResume(outStream, NULL, lps);
+    result = _decoder->CodeResume(outStream, NULL, progress);
 
     packSize = _decoder->GetInputProcessedSize();
     unpackedSize = outStream->GetSize();
@@ -819,8 +829,6 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
       result = S_FALSE;
       break;
     }
-
-    // break; // we can use break, if we need only first stream
   }
 
   } catch(const CInBufferException &e) { return e.ErrorCode; }
@@ -836,27 +844,130 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     _numStreams_Defined = true;
   }
 
-  // outStream.Release();
-
-  retResult = NExtract::NOperationResult::kDataError;
+  opRes = NExtract::NOperationResult::kDataError;
 
   if (!_isArc)
-    retResult = NExtract::NOperationResult::kIsNotArc;
+    opRes = NExtract::NOperationResult::kIsNotArc;
   else if (_needMoreInput)
-    retResult = NExtract::NOperationResult::kUnexpectedEnd;
+    opRes = NExtract::NOperationResult::kUnexpectedEnd;
   else if (crcError)
-    retResult = NExtract::NOperationResult::kCRCError;
+    opRes = NExtract::NOperationResult::kCRCError;
   else if (_dataAfterEnd)
-    retResult = NExtract::NOperationResult::kDataAfterEnd;
+    opRes = NExtract::NOperationResult::kDataAfterEnd;
   else if (result == S_FALSE)
-    retResult = NExtract::NOperationResult::kDataError;
+    opRes = NExtract::NOperationResult::kDataError;
   else if (result == S_OK)
-    retResult = NExtract::NOperationResult::kOK;
+    opRes = NExtract::NOperationResult::kOK;
   else
     return result;
+
+  if (progress)
+    RINOK(progress->SetRatioInfo(&packSize, &unpackedSize))
+  return S_OK;
+}
+
+Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
+    Int32 testMode, IArchiveExtractCallback *extractCallback))
+{
+  COM_TRY_BEGIN
+  if (numItems == 0)
+    return S_OK;
+  if (numItems != (UInt32)(Int32)-1 && (numItems != 1 || indices[0] != 0))
+    return E_INVALIDARG;
+
+  if (_packSize_Defined)
+    RINOK(extractCallback->SetTotal(_packSize))
+  // UInt64 currentTotalPacked = 0;
+  // RINOK(extractCallback->SetCompleted(&currentTotalPacked));
+  Int32 retResult;
+ {
+  CMyComPtr<ISequentialOutStream> realOutStream;
+  const Int32 askMode = testMode ?
+      NExtract::NAskMode::kTest :
+      NExtract::NAskMode::kExtract;
+  RINOK(extractCallback->GetStream(0, &realOutStream, askMode))
+  if (!testMode && !realOutStream)
+    return S_OK;
+
+  RINOK(extractCallback->PrepareOperation(askMode))
+
+  CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
+  lps->Init(extractCallback, true);
+
+  RINOK(DecodeToOutput(realOutStream, lps, retResult))
  }
 
   return extractCallback->SetOperationResult(retResult);
+  COM_TRY_END
+}
+
+Z7_CLASS_IMP_COM_2(
+  CDecodedTempInStream,
+  IInStream,
+  IStreamGetSize
+)
+  Z7_IFACE_COM7_IMP(ISequentialInStream)
+
+  NFile::NDir::CTempFile _tempFile;
+  CMyComPtr2<IInStream, CInFileStream> _inStream;
+
+public:
+  HRESULT Create(CHandler *handler);
+};
+
+Z7_COM7F_IMF(CDecodedTempInStream::Read(void *data, UInt32 size, UInt32 *processedSize))
+{
+  return _inStream.Interface()->Read(data, size, processedSize);
+}
+
+Z7_COM7F_IMF(CDecodedTempInStream::Seek(Int64 offset, UInt32 seekOrigin, UInt64 *newPosition))
+{
+  return _inStream.Interface()->Seek(offset, seekOrigin, newPosition);
+}
+
+Z7_COM7F_IMF(CDecodedTempInStream::GetSize(UInt64 *size))
+{
+  return _inStream->GetSize(size);
+}
+
+HRESULT CDecodedTempInStream::Create(CHandler *handler)
+{
+  CMyComPtr2_Create<IOutStream, COutFileStream> outStream;
+  if (!_tempFile.CreateRandomInTempFolder(FTEXT("WinZST"), &outStream->File))
+    return GetLastError_noZero_HRESULT();
+
+  Int32 opRes;
+  const HRESULT hres = handler->DecodeToOutput(outStream.Interface(), NULL, opRes);
+  const HRESULT closeRes = outStream->Close();
+  if (hres != S_OK)
+    return hres;
+  RINOK(closeRes)
+  if (opRes != NExtract::NOperationResult::kOK)
+    return S_FALSE;
+
+  _inStream.Create_if_Empty();
+  if (!_inStream->Open(_tempFile.GetPath()))
+    return GetLastError_noZero_HRESULT();
+  return S_OK;
+}
+
+Z7_COM7F_IMF(CHandler::GetStream(UInt32 index, ISequentialInStream **stream))
+{
+  COM_TRY_BEGIN
+
+  *stream = NULL;
+  if (index != 0)
+    return E_INVALIDARG;
+  if (!_tarMode || !_stream)
+    return S_FALSE;
+
+  CMyComPtr2<ISequentialInStream, CDecodedTempInStream> tempStream;
+  tempStream.Create_if_Empty();
+  RINOK(tempStream->Create(this))
+
+  *stream = tempStream.Detach();
+  return S_OK;
+
   COM_TRY_END
 }
 
@@ -921,22 +1032,20 @@ static HRESULT ReportArcProps(IArchiveUpdateCallbackArcProp *reportArcProp,
 }
 */
 
-static HRESULT UpdateArchive(
+static HRESULT CompressStream(
     ISequentialOutStream *outStream,
+    ISequentialInStream *fileInStream,
     UInt64 unpackSize,
     CItem &item,
     const CSingleMethodProps &props,
     const CHandlerTimeOptions &timeOptions,
-    IArchiveUpdateCallback *updateCallback
+    IArchiveUpdateCallback *updateCallback,
+    bool setOperationResult
     // , IArchiveUpdateCallbackArcProp *reportArcProp
     )
 {
   UInt64 unpackSizeReal;
   {
-  CMyComPtr<ISequentialInStream> fileInStream;
-
-  RINOK(updateCallback->GetStream(0, &fileInStream))
-
   if (!fileInStream)
     return S_FALSE;
 
@@ -996,7 +1105,26 @@ static HRESULT UpdateArchive(
         &unpackSizeReal));
   }
   */
-  return updateCallback->SetOperationResult(NUpdate::NOperationResult::kOK);
+  if (setOperationResult)
+    return updateCallback->SetOperationResult(NUpdate::NOperationResult::kOK);
+  return S_OK;
+}
+
+static HRESULT UpdateArchive(
+    ISequentialOutStream *outStream,
+    UInt64 unpackSize,
+    CItem &item,
+    const CSingleMethodProps &props,
+    const CHandlerTimeOptions &timeOptions,
+    IArchiveUpdateCallback *updateCallback
+    // , IArchiveUpdateCallbackArcProp *reportArcProp
+    )
+{
+  CMyComPtr<ISequentialInStream> fileInStream;
+
+  RINOK(updateCallback->GetStream(0, &fileInStream))
+
+  return CompressStream(outStream, fileInStream, unpackSize, item, props, timeOptions, updateCallback, true);
 }
 
 
@@ -1034,6 +1162,27 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
 {
   COM_TRY_BEGIN
 
+  if (!updateCallback)
+    return E_FAIL;
+
+  if (NTarWrap::IsTarUpdate(updateCallback, kTarGzSuffixes, Z7_ARRAY_SIZE(kTarGzSuffixes)))
+  {
+    {
+      Z7_DECL_CMyComPtr_QI_FROM(
+          IStreamSetRestriction,
+          setRestriction, outStream)
+      if (setRestriction)
+        RINOK(setRestriction->SetRestriction(0, 0))
+    }
+    NTarWrap::CTempTarInStream tarStream;
+    RINOK(tarStream.Create(numItems, updateCallback, false))
+
+    CItem newItem;
+    newItem.HostOS = kHostOS;
+    return CompressStream(outStream, tarStream.GetStream(), tarStream.GetSize(),
+        newItem, _props, _timeOptions, updateCallback, false);
+  }
+
   if (numItems != 1)
     return E_INVALIDARG;
 
@@ -1047,8 +1196,6 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
 
   Int32 newData, newProps;
   UInt32 indexInArchive;
-  if (!updateCallback)
-    return E_FAIL;
   RINOK(updateCallback->GetUpdateItemInfo(0, &newData, &newProps, &indexInArchive))
 
   // Z7_DECL_CMyComPtr_QI_FROM(IArchiveUpdateCallbackArcProp, reportArcProp, updateCallback)

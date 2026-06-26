@@ -1,4 +1,4 @@
-PROG = 7zFM.exe
+PROG = WinZSTFM.exe
 
 !include "../Format7zF/Arc.mak"
 

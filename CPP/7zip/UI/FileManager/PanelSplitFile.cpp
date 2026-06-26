@@ -308,7 +308,7 @@ void CApp::Split()
 
   CProgressDialog &progressDialog = spliter;
 
-  const UString progressWindowTitle ("7-Zip"); // LangString(IDS_APP_TITLE, 0x03000000);
+  const UString progressWindowTitle ("WinZST"); // LangString(IDS_APP_TITLE, 0x03000000);
   const UString title = LangString(IDS_SPLITTING);
 
   progressDialog.ShowCompressionInfo = false;
@@ -537,7 +537,7 @@ void CApp::Combine()
     CProgressDialog &progressDialog = combiner;
     progressDialog.ShowCompressionInfo = false;
   
-    const UString progressWindowTitle ("7-Zip"); // LangString(IDS_APP_TITLE, 0x03000000);
+    const UString progressWindowTitle ("WinZST"); // LangString(IDS_APP_TITLE, 0x03000000);
     const UString title = LangString(IDS_COMBINING);
     
     progressDialog.MainWindow = _window;
