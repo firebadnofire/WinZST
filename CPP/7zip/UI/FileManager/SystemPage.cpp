@@ -270,7 +270,7 @@ static UString GetProgramCommand()
 {
   UString s ('\"');
   s += fs2us(NDLL::GetModuleDirPrefix());
-  s += "7zFM.exe\" \"%1\"";
+  s += "WinZSTFM.exe\" \"%1\"";
   return s;
 }
 

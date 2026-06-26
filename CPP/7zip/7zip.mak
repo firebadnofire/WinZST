@@ -25,12 +25,26 @@ OBJS = \
   $(WIM_OBJS) \
   $(ZIP_OBJS) \
   $(COMPRESS_OBJS) \
+  $(ZSTD_COMMON_OBJS) \
+  $(ZSTD_COMPRESS_OBJS) \
   $(CRYPTO_OBJS) \
   $(C_OBJS) \
   $(ASM_OBJS) \
   $O\resource.res \
 
 !include "../../../Build.mak"
+
+ZSTD_CFLAGS = $(CFLAGS_C_ALL) \
+  -DZSTD_DISABLE_ASM \
+  -DZSTD_DISABLE_DEPRECATE_WARNINGS \
+  -DZSTD_LEGACY_SUPPORT=0 \
+  -DXXH_NAMESPACE=ZSTD_ \
+  -wd4464 \
+  -wd4574 \
+  -wd4710 \
+  -wd4711 \
+  -wd4820 \
+  -wd5045 \
 
 # MAK_SINGLE_FILE = 1
 
@@ -172,6 +186,16 @@ $(C_OBJS): ../../../../C/$(*B).c
 	$(COMPL_O2)
 !ENDIF
 
+!IFDEF ZSTD_COMMON_OBJS
+$(ZSTD_COMMON_OBJS): ../../../../C/zstd/lib/common/$(*B).c
+	$(CC) $(ZSTD_CFLAGS) ../../../../C/zstd/lib/common/$(*B).c
+!ENDIF
+
+!IFDEF ZSTD_COMPRESS_OBJS
+$(ZSTD_COMPRESS_OBJS): ../../../../C/zstd/lib/compress/$(*B).c
+	$(CC) $(ZSTD_CFLAGS) ../../../../C/zstd/lib/compress/$(*B).c
+!ENDIF
+
 
 !ELSE
 
@@ -232,6 +256,10 @@ $(C_OBJS): ../../../../C/$(*B).c
 	$(COMPLB_O2)
 {../../Crypto}.cpp{$O}.obj::
 	$(COMPLB_O2)
+{../../../../C/zstd/lib/common}.c{$O}.obj::
+	$(CC) $(ZSTD_CFLAGS) $<
+{../../../../C/zstd/lib/compress}.c{$O}.obj::
+	$(CC) $(ZSTD_CFLAGS) $<
 {../../../../C}.c{$O}.obj::
 	$(CCOMPLB)
 

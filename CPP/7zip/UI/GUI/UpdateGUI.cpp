@@ -31,6 +31,26 @@ using namespace NDir;
 static const char * const kDefaultSfxModule = "7z.sfx";
 static const char * const kSFXExtension = "exe";
 
+static bool GetArchivePathExtension(const UString &path, UString &ext)
+{
+  UString prefix, name;
+  SplitPathToParts_2(path, prefix, name);
+  const int dotPos = name.ReverseFind_Dot();
+  if (dotPos < 0 || (unsigned)dotPos == name.Len() - 1)
+    return false;
+  ext = name.Ptr((unsigned)dotPos + 1);
+  return true;
+}
+
+static bool IsZstdOutputExtension(const UString &ext)
+{
+  return
+      ext.IsEqualTo_Ascii_NoCase("tzs")
+   || ext.IsEqualTo_Ascii_NoCase("tzst")
+   || ext.IsEqualTo_Ascii_NoCase("tzstd")
+   || ext.IsEqualTo_Ascii_NoCase("zst");
+}
+
 extern void AddMessageToString(UString &dest, const UString &src);
 
 UString HResultToMessage(HRESULT errorCode);
@@ -395,10 +415,15 @@ static HRESULT ShowDialog(
   if (options.MethodMode.Type_Defined)
     di.FormatIndex = options.MethodMode.Type.FormatIndex;
   
+  int tarFormatIndex = -1;
   FOR_VECTOR (i, codecs->Formats)
   {
     const CArcInfoEx &ai = codecs->Formats[i];
     if (!ai.UpdateEnabled)
+      continue;
+    if (ai.Is_Tar())
+      tarFormatIndex = (int)i;
+    if (!oneFile && ai.Is_Zstd())
       continue;
     if (!oneFile && ai.Flags_KeepName())
       continue;
@@ -408,7 +433,7 @@ static HRESULT ShowDialog(
         continue;
       if (ai.Name.IsEqualTo_Ascii_NoCase("swfc"))
         if (!oneFile || name.Len() < 4 || !StringsAreEqualNoCase_Ascii(name.RightPtr(4), ".swf"))
-          continue;
+            continue;
     }
     dialog.ArcIndices.Add(i);
   }
@@ -416,6 +441,13 @@ static HRESULT ShowDialog(
   {
     ShowErrorMessage(L"No Update Engines");
     return E_FAIL;
+  }
+  if (tarFormatIndex >= 0)
+  {
+    if (di.FormatIndex < 0 ||
+        ((unsigned)di.FormatIndex < codecs->Formats.Size() &&
+        codecs->Formats[(unsigned)di.FormatIndex].Is_Zstd()))
+      di.FormatIndex = tarFormatIndex;
   }
 
   // di.ArchiveName = options.ArchivePath.GetFinalPath();
@@ -519,7 +551,16 @@ static HRESULT ShowDialog(
   options.MethodMode.Type_Defined = true;
   options.MethodMode.Type.FormatIndex = di.FormatIndex;
 
-  options.ArchivePath.VolExtension = archiverInfo.GetMainExt();
+  UString volExtension = archiverInfo.GetMainExt();
+  if (archiverInfo.Is_Zstd())
+  {
+    UString pathExtension;
+    if (GetArchivePathExtension(di.ArcPath, pathExtension))
+      if (IsZstdOutputExtension(pathExtension))
+        volExtension = pathExtension;
+  }
+
+  options.ArchivePath.VolExtension = volExtension;
   if (di.SFXMode)
     options.ArchivePath.BaseExtension = kSFXExtension;
   else

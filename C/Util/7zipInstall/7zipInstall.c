@@ -56,9 +56,9 @@ typedef enum {
 #define Z7_7ZIP_CUR_VER ((MY_VER_MAJOR << 16) | MY_VER_MINOR)
 #define Z7_7ZIP_DLL_VER_COMPAT ((16 << 16) | 3)
 
-static LPCSTR const k_7zip = "7-Zip";
+static LPCSTR const k_7zip = "WinZST";
 
-static LPCWSTR const k_Reg_Software_7zip = L"Software\\7-Zip";
+static LPCWSTR const k_Reg_Software_7zip = L"Software\\WinZST";
 
 // #define Z7_64BIT_INSTALLER 1
 
@@ -66,7 +66,7 @@ static LPCWSTR const k_Reg_Software_7zip = L"Software\\7-Zip";
   #define Z7_64BIT_INSTALLER 1
 #endif
 
-#define k_7zip_with_Ver_base L"7-Zip " LLL(MY_VERSION)
+#define k_7zip_with_Ver_base L"WinZST " LLL(MY_VERSION)
 
 #ifdef Z7_64BIT_INSTALLER
 
@@ -118,7 +118,7 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 #endif
 #endif
 
-#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
+#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-0001000A0000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";
@@ -618,9 +618,9 @@ static LPCWSTR FindSubString(LPCWSTR s1, const char *s2)
 static void Set7zipPostfix(WCHAR *s)
 {
   NormalizePrefix(s);
-  if (FindSubString(s, "7-Zip"))
+  if (FindSubString(s, "WinZST"))
     return;
-  CatAscii(s, "7-Zip\\");
+  CatAscii(s, "WinZST\\");
 }
     
 
@@ -825,13 +825,13 @@ static void SetShellProgramsGroup(HWND hwndOwner)
       for (k = 0; k < 2; k++)
       {
         CpyAscii(link + baseLen, k == 0 ?
-            "7-Zip File Manager.lnk" :
-            "7-Zip Help.lnk"
+            "WinZST File Manager.lnk" :
+            "WinZST README.lnk"
            );
         wcscpy(destPath, path);
         CatAscii(destPath, k == 0 ?
-            "7zFM.exe" :
-            "7-zip.chm");
+            "WinZSTFM.exe" :
+            "README.md");
         
         if (i == 0)
           DeleteFileW(link);
@@ -848,7 +848,7 @@ static void SetShellProgramsGroup(HWND hwndOwner)
 }
 
 static LPCWSTR const k_Shell_Approved = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
-static LPCWSTR const k_7zip_ShellExtension = L"7-Zip Shell Extension";
+static LPCWSTR const k_7zip_ShellExtension = L"WinZST Shell Extension";
 
 static void WriteCLSID(void)
 {
@@ -909,7 +909,7 @@ static void WriteShellEx(void)
   for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
   {
     CpyAscii(destPath, k_ShellEx_Items[i]);
-    CatAscii(destPath, "\\7-Zip");
+    CatAscii(destPath, "\\WinZST");
 
     #ifdef USE_7ZIP_32_DLL
     MyRegistry_CreateKeyAndVal_32(HKEY_CLASSES_ROOT, destPath, NULL, k_7zip_CLSID);
@@ -924,11 +924,11 @@ static void WriteShellEx(void)
 
 
   wcscpy(destPath, path);
-  CatAscii(destPath, "7zFM.exe");
+  CatAscii(destPath, "WinZSTFM.exe");
   
   {
     HKEY destKey = 0;
-    LONG res = MyRegistry_CreateKey(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\7zFM.exe", &destKey);
+    LONG res = MyRegistry_CreateKey(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinZSTFM.exe", &destKey);
     if (res == ERROR_SUCCESS)
     {
       MyRegistry_SetString(destKey, NULL, destPath);
@@ -940,7 +940,7 @@ static void WriteShellEx(void)
   
   {
     HKEY destKey = 0;
-    LONG res = MyRegistry_CreateKey(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\7-Zip", &destKey);
+    LONG res = MyRegistry_CreateKey(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WinZST", &destKey);
     if (res == ERROR_SUCCESS)
     {
       MyRegistry_SetString(destKey, L"DisplayName", k_7zip_with_Ver_str);

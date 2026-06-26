@@ -609,13 +609,13 @@ HRESULT CPanel::OpenParentArchiveFolder()
     if (folderLink.WasChanged_from_FolderLink(newFileInfo))
     {
       const UString message = MyFormatNew(IDS_WANT_UPDATE_MODIFIED_FILE, folderLink.RelPath);
-      if (::MessageBoxW((HWND)*this, message, L"7-Zip", MB_YESNOCANCEL | MB_ICONQUESTION) == IDYES)
+      if (::MessageBoxW((HWND)*this, message, L"WinZST", MB_YESNOCANCEL | MB_ICONQUESTION) == IDYES)
       {
         if (OnOpenItemChanged(folderLink.FileIndex, fs2us(folderLink.FilePath),
             folderLinkPrev.UsePassword, folderLinkPrev.Password) != S_OK)
         {
           ::MessageBoxW((HWND)*this, MyFormatNew(IDS_CANNOT_UPDATE_FILE,
-              fs2us(folderLink.FilePath)), L"7-Zip", MB_OK | MB_ICONSTOP);
+              fs2us(folderLink.FilePath)), L"WinZST", MB_OK | MB_ICONSTOP);
           return S_OK;
         }
       }
@@ -739,7 +739,7 @@ static HRESULT StartEditApplication(const UString &path, bool useEditor, HWND wi
 
   const WRes res = StartAppWithParams(command, params, process);
   if (res != 0)
-    ::MessageBoxW(window, LangString(IDS_CANNOT_START_EDITOR), L"7-Zip", MB_OK  | MB_ICONSTOP);
+    ::MessageBoxW(window, LangString(IDS_CANNOT_START_EDITOR), L"WinZST", MB_OK  | MB_ICONSTOP);
   return HRESULT_FROM_WIN32(res);
 }
 
@@ -810,7 +810,7 @@ void CApp::DiffFiles(const UString &path1, const UString &path2)
   }
   if (res == 0)
     return;
-  ::MessageBoxW(_window, LangString(IDS_CANNOT_START_EDITOR), L"7-Zip", MB_OK  | MB_ICONSTOP);
+  ::MessageBoxW(_window, LangString(IDS_CANNOT_START_EDITOR), L"WinZST", MB_OK  | MB_ICONSTOP);
 }
 
 
@@ -1251,17 +1251,17 @@ static THREAD_FUNC_DECL MyThreadFunction(void *param)
           AddLangString(m, IDS_PROP_READ_ONLY);
           m.Add_LF();
           m += tpi->FullPathFolderPrefix;
-          ::MessageBoxW(g_HWND, m, L"7-Zip", MB_OK | MB_ICONSTOP);
+          ::MessageBoxW(g_HWND, m, L"WinZST", MB_OK | MB_ICONSTOP);
           return 0;
         }
         {
           const UString message = MyFormatNew(IDS_WANT_UPDATE_MODIFIED_FILE, tpi->RelPath);
-          if (::MessageBoxW(g_HWND, message, L"7-Zip", MB_YESNOCANCEL | MB_ICONQUESTION) == IDYES)
+          if (::MessageBoxW(g_HWND, message, L"WinZST", MB_YESNOCANCEL | MB_ICONQUESTION) == IDYES)
           {
             // DEBUG_PRINT_NUM("SendMessage", GetCurrentThreadId());
             if (SendMessage(tpi->Window, kOpenItemChanged, 0, (LONG_PTR)tpi.get()) != 1)
             {
-              ::MessageBoxW(g_HWND, m, L"7-Zip", MB_OK | MB_ICONSTOP);
+              ::MessageBoxW(g_HWND, m, L"WinZST", MB_OK | MB_ICONSTOP);
               return 0;
             }
           }

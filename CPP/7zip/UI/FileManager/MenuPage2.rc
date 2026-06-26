@@ -4,9 +4,9 @@
 
 #define zoneX 100
 
-CAPTION "7-Zip"
+CAPTION "WinZST"
 BEGIN
-  MY_CONTROL_CHECKBOX ( "Integrate 7-Zip to shell context menu", IDX_SYSTEM_INTEGRATE_TO_MENU, m, m, xc)
+  MY_CONTROL_CHECKBOX ( "Integrate WinZST to shell context menu", IDX_SYSTEM_INTEGRATE_TO_MENU, m, m, xc)
   MY_CONTROL_CHECKBOX ( "(32-bit)", IDX_SYSTEM_INTEGRATE_TO_MENU_2, m, m + 14, xc)
   MY_CONTROL_CHECKBOX ( "Cascaded context menu", IDX_SYSTEM_CASCADED_MENU, m, m + 28, xc)
   MY_CONTROL_CHECKBOX ( "Icons in context menu", IDX_SYSTEM_ICON_IN_MENU, m, m + 42, xc)

@@ -3,11 +3,12 @@
 #include "StdAfx.h"
 
 // #define Z7_USE_ZSTD_ORIG_DECODER
-// #define Z7_USE_ZSTD_COMPRESSION
 
 #include "../../Common/ComTry.h"
+#include "../../Common/MyBuffer.h"
 
 #include "../Common/MethodProps.h"
+#include "../Common/FileStreams.h"
 #include "../Common/ProgressUtils.h"
 #include "../Common/RegisterArc.h"
 #include "../Common/StreamUtils.h"
@@ -18,20 +19,22 @@
 #include "../Compress/Zstd2Decoder.h"
 #endif
 
-#ifdef Z7_USE_ZSTD_COMPRESSION
-#include "../Compress/ZstdEncoder.h"
-#include "../Compress/ZstdEncoderProps.h"
-#include "Common/HandlerOut.h"
-#endif
-
 #include "Common/DummyOutStream.h"
+#include "Tar/TarHandler.h"
 
 #include "../../../C/CpuArch.h"
+#include "../../../C/zstd/lib/zstd.h"
+
+#include "../../Windows/FileDir.h"
 
 using namespace NWindows;
 
 namespace NArchive {
 namespace NZstd {
+
+static const UInt32 kZstdDefaultLevel = 5;
+
+class CDecodedTempInStream;
 
 #define DESCRIPTOR_Get_DictionaryId_Flag(d)   ((d) & 3)
 #define DESCRIPTOR_FLAG_CHECKSUM              (1 << 2)
@@ -111,16 +114,18 @@ struct CFrameHeader
 class CHandler Z7_final:
   public IInArchive,
   public IArchiveOpenSeq,
+  public IInArchiveGetStream,
   public ISetProperties,
-#ifdef Z7_USE_ZSTD_COMPRESSION
+#ifndef Z7_EXTRACT_ONLY
   public IOutArchive,
 #endif
   public CMyUnknownImp
 {
   Z7_COM_QI_BEGIN2(IInArchive)
   Z7_COM_QI_ENTRY(IArchiveOpenSeq)
+  Z7_COM_QI_ENTRY(IInArchiveGetStream)
   Z7_COM_QI_ENTRY(ISetProperties)
-#ifdef Z7_USE_ZSTD_COMPRESSION
+#ifndef Z7_EXTRACT_ONLY
   Z7_COM_QI_ENTRY(IOutArchive)
 #endif
   Z7_COM_QI_END
@@ -128,8 +133,9 @@ class CHandler Z7_final:
   
   Z7_IFACE_COM7_IMP(IInArchive)
   Z7_IFACE_COM7_IMP(IArchiveOpenSeq)
+  Z7_IFACE_COM7_IMP(IInArchiveGetStream)
   Z7_IFACE_COM7_IMP(ISetProperties)
-#ifdef Z7_USE_ZSTD_COMPRESSION
+#ifndef Z7_EXTRACT_ONLY
   Z7_IFACE_COM7_IMP(IOutArchive)
 #endif
 
@@ -146,8 +152,11 @@ class CHandler Z7_final:
   
   bool _parseMode;
   bool _disableHash;
+  bool _tarMode;
+  bool _tarPosixMode;
   // bool _smallMode;
 
+  UInt32 _level;
   UInt64 _phySize;
   UInt64 _phySize_Decoded;
   UInt64 _unpackSize;
@@ -157,15 +166,19 @@ class CHandler Z7_final:
 
   CMyComPtr<IInStream> _stream;
   CMyComPtr<ISequentialInStream> _seqStream;
+  UString _subFileName;
 
-#ifdef Z7_USE_ZSTD_COMPRESSION
-  CSingleMethodProps _props;
-#endif
+  HRESULT DecodeToOutput(ISequentialOutStream *outStream, ICompressProgressInfo *progress,
+      UInt64 &inSize, UInt64 &outSize, SRes &decodeSRes, bool &extraSize);
+  friend class CDecodedTempInStream;
 
 public:
   CHandler():
     _parseMode(false),
-    _disableHash(false)
+    _disableHash(false),
+    _tarMode(false),
+    _tarPosixMode(false),
+    _level(kZstdDefaultLevel)
     // _smallMode(false)
     {}
 };
@@ -203,6 +216,57 @@ static const char * const kNames[] =
   , "Reserved"
 };
 */
+
+static bool StringEndsWith_Ascii_NoCase(const UString &s, const char *suffix)
+{
+  unsigned len = 0;
+  while (suffix[len] != 0)
+    len++;
+  if (s.Len() < len)
+    return false;
+  return StringsAreEqualNoCase_Ascii(s.RightPtr(len), suffix);
+}
+
+static bool RemoveSuffix_Ascii_NoCase(UString &s, const char *suffix)
+{
+  unsigned len = 0;
+  while (suffix[len] != 0)
+    len++;
+  if (s.Len() <= len)
+    return false;
+  if (!StringsAreEqualNoCase_Ascii(s.RightPtr(len), suffix))
+    return false;
+  s.DeleteFrom(s.Len() - len);
+  return true;
+}
+
+static bool IsTarZstdName(const UString &name)
+{
+  return
+      StringEndsWith_Ascii_NoCase(name, ".tzs")
+   || StringEndsWith_Ascii_NoCase(name, ".tzst")
+   || StringEndsWith_Ascii_NoCase(name, ".tzstd")
+   || StringEndsWith_Ascii_NoCase(name, ".tar.zst");
+}
+
+static bool GetTarZstdSubFileName(const UString &name, UString &subFileName)
+{
+  subFileName = name;
+  if (RemoveSuffix_Ascii_NoCase(subFileName, ".tar.zst"))
+  {
+    subFileName += ".tar";
+    return true;
+  }
+  if (RemoveSuffix_Ascii_NoCase(subFileName, ".tzs")
+      || RemoveSuffix_Ascii_NoCase(subFileName, ".tzst")
+      || RemoveSuffix_Ascii_NoCase(subFileName, ".tzstd"))
+  {
+    subFileName += ".tar";
+    return true;
+  }
+  subFileName.Empty();
+  return false;
+}
 
 static void Add_UInt64(AString &s, const char *name, UInt64 v)
 {
@@ -386,6 +450,10 @@ Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
       prop = v;
       break;
     }
+    case kpidMainSubfile:
+      if (_tarMode)
+        prop = (UInt32)0;
+      break;
 
     default: break;
   }
@@ -405,6 +473,11 @@ Z7_COM7F_IMF(CHandler::GetProperty(UInt32 /* index */, PROPID propID, PROPVARIAN
   NCOM::CPropVariant prop;
   switch (propID)
   {
+    case kpidPath:
+      if (_tarMode && !_subFileName.IsEmpty())
+        prop = _subFileName;
+      break;
+
     case kpidPackSize:
       if (_wasParsed)
         prop = _phySize;
@@ -522,6 +595,22 @@ Z7_COM7F_IMF(CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallb
 {
   COM_TRY_BEGIN
   Close();
+
+  if (callback)
+  {
+    CMyComPtr<IArchiveOpenVolumeCallback> volumeCallback;
+    callback->QueryInterface(IID_IArchiveOpenVolumeCallback, (void **)&volumeCallback);
+    if (volumeCallback)
+    {
+      NCOM::CPropVariant prop;
+      if (volumeCallback->GetProperty(kpidName, &prop) == S_OK
+          && prop.vt == VT_BSTR
+          && prop.bstrVal != NULL)
+      {
+        _tarMode = GetTarZstdSubFileName(prop.bstrVal, _subFileName);
+      }
+    }
+  }
 
   CZstdDecInfo *p = &_parsed_Info;
   // p->are_ContentSize_Unknown = False;
@@ -749,6 +838,8 @@ Z7_COM7F_IMF(CHandler::Close())
   _phySize_Decoded_Defined = false;
   _unpackSize_Defined = false;
   _decoded_Info_Defined = false;
+  _tarMode = false;
+  _subFileName.Empty();
 
   ZstdDecInfo_CLEAR(&_parsed_Info)
   ZstdDecInfo_CLEAR(&_decoded_Info)
@@ -760,6 +851,139 @@ Z7_COM7F_IMF(CHandler::Close())
   _seqStream.Release();
   _stream.Release();
   return S_OK;
+}
+
+HRESULT CHandler::DecodeToOutput(ISequentialOutStream *outStream, ICompressProgressInfo *progress,
+    UInt64 &inSize, UInt64 &outSize, SRes &decodeSRes, bool &extraSize)
+{
+  if (_needSeekToStart)
+  {
+    if (!_stream)
+      return E_FAIL;
+    RINOK(_stream->Seek(0, STREAM_SEEK_SET, NULL))
+  }
+  else
+    _needSeekToStart = true;
+
+#ifdef Z7_USE_ZSTD_ORIG_DECODER
+  CMyComPtr2_Create<ICompressCoder, NCompress::NZstd2::CDecoder> decoder;
+#else
+  CMyComPtr2_Create<ICompressCoder, NCompress::NZstd::CDecoder> decoder;
+#endif
+
+  CMyComPtr2_Create<ISequentialOutStream, CDummyOutStream> outStreamSpec;
+  outStreamSpec->SetStream(outStream);
+  outStreamSpec->Init();
+
+  decoder->FinishMode = true;
+#ifndef Z7_USE_ZSTD_ORIG_DECODER
+  decoder->DisableHash = _disableHash;
+#endif
+
+  const HRESULT hres = decoder.Interface()->Code(_seqStream, outStreamSpec, NULL, NULL, progress);
+  outSize = outStreamSpec->GetSize();
+
+  decodeSRes = SZ_OK;
+  extraSize = false;
+  inSize = 0;
+
+  if (hres == S_OK || hres == S_FALSE)
+  {
+#ifndef Z7_USE_ZSTD_ORIG_DECODER
+    _decoded_Info_Defined = true;
+    _decoded_Info = decoder->_state.info;
+    inSize = decoder->_inProcessed;
+    decodeSRes = decoder->ResInfo.decode_SRes;
+    extraSize = (decoder->ResInfo.extraSize != 0);
+#else
+    inSize = decoder->GetInputProcessedSize();
+#endif
+    _phySize_Decoded = inSize;
+    _phySize_Decoded_Defined = true;
+
+    _unpackSize_Defined = true;
+    _unpackSize = outSize;
+
+    if (progress)
+      progress->SetRatioInfo(&inSize, &outSize);
+  }
+
+  return hres;
+}
+
+
+Z7_CLASS_IMP_COM_2(
+  CDecodedTempInStream,
+  IInStream,
+  IStreamGetSize
+)
+  Z7_IFACE_COM7_IMP(ISequentialInStream)
+
+  NFile::NDir::CTempFile _tempFile;
+  CMyComPtr2<IInStream, CInFileStream> _inStream;
+
+public:
+  HRESULT Create(CHandler *handler);
+};
+
+Z7_COM7F_IMF(CDecodedTempInStream::Read(void *data, UInt32 size, UInt32 *processedSize))
+{
+  return _inStream.Interface()->Read(data, size, processedSize);
+}
+
+Z7_COM7F_IMF(CDecodedTempInStream::Seek(Int64 offset, UInt32 seekOrigin, UInt64 *newPosition))
+{
+  return _inStream.Interface()->Seek(offset, seekOrigin, newPosition);
+}
+
+Z7_COM7F_IMF(CDecodedTempInStream::GetSize(UInt64 *size))
+{
+  return _inStream->GetSize(size);
+}
+
+HRESULT CDecodedTempInStream::Create(CHandler *handler)
+{
+  CMyComPtr2_Create<IOutStream, COutFileStream> outStream;
+  if (!_tempFile.CreateRandomInTempFolder(FTEXT("WinZST"), &outStream->File))
+    return GetLastError_noZero_HRESULT();
+
+  UInt64 inSize, outSize;
+  SRes decodeSRes;
+  bool extraSize;
+  const HRESULT hres = handler->DecodeToOutput(outStream.Interface(), NULL,
+      inSize, outSize, decodeSRes, extraSize);
+  const HRESULT closeRes = outStream->Close();
+  if (hres != S_OK)
+    return hres;
+  RINOK(closeRes)
+  if (decodeSRes != SZ_OK || extraSize)
+    return S_FALSE;
+
+  _inStream.Create_if_Empty();
+  if (!_inStream->Open(_tempFile.GetPath()))
+    return GetLastError_noZero_HRESULT();
+  return S_OK;
+}
+
+
+Z7_COM7F_IMF(CHandler::GetStream(UInt32 index, ISequentialInStream **stream))
+{
+  COM_TRY_BEGIN
+
+  *stream = NULL;
+  if (index != 0)
+    return E_INVALIDARG;
+  if (!_tarMode || !_stream)
+    return S_FALSE;
+
+  CMyComPtr2<ISequentialInStream, CDecodedTempInStream> tempStream;
+  tempStream.Create_if_Empty();
+  RINOK(tempStream->Create(this))
+
+  *stream = tempStream.Detach();
+  return S_OK;
+
+  COM_TRY_END
 }
 
 
@@ -788,53 +1012,15 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
       
     extractCallback->PrepareOperation(askMode);
     
-    if (_needSeekToStart)
-    {
-      if (!_stream)
-        return E_FAIL;
-      RINOK(_stream->Seek(0, STREAM_SEEK_SET, NULL))
-    }
-    else
-      _needSeekToStart = true;
-    
     CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
     lps->Init(extractCallback, true);
     
-#ifdef Z7_USE_ZSTD_ORIG_DECODER
-    CMyComPtr2_Create<ICompressCoder, NCompress::NZstd2::CDecoder> decoder;
-#else
-    CMyComPtr2_Create<ICompressCoder, NCompress::NZstd::CDecoder> decoder;
-#endif
-
-    CMyComPtr2_Create<ISequentialOutStream, CDummyOutStream> outStreamSpec;
-    outStreamSpec->SetStream(realOutStream);
-    outStreamSpec->Init();
-    // realOutStream.Release();
-    
-    decoder->FinishMode = true;
-#ifndef Z7_USE_ZSTD_ORIG_DECODER
-    decoder->DisableHash = _disableHash;
-#endif
-    
     // _dataAfterEnd = false;
     // _needMoreInput = false;
-    const HRESULT hres = decoder.Interface()->Code(_seqStream, outStreamSpec, NULL, NULL, lps);
-    /*
-    {
-      UInt64 t1 = decoder->GetInputProcessedSize();
-      // for debug
-      const UInt32 kTempSize = 64;
-      Byte buf[kTempSize];
-      UInt32 processedSize = 0;
-      RINOK(decoder->ReadUnusedFromInBuf(buf, kTempSize, &processedSize))
-      processedSize -= processedSize;
-      UInt64 t2 = decoder->GetInputProcessedSize();
-      t2 = t2;
-      t1 = t1;
-    }
-    */
-    const UInt64 outSize = outStreamSpec->GetSize();
-  // }
+    UInt64 inSize, outSize;
+    SRes decodeSRes;
+    bool extraSize;
+    const HRESULT hres = DecodeToOutput(realOutStream, lps, inSize, outSize, decodeSRes, extraSize);
 
     // if (hres == E_ABORT) return hres;
     opRes = NExtract::NOperationResult::kDataError;
@@ -846,52 +1032,30 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     }
     else if (hres == S_OK || hres == S_FALSE)
     {
-#ifndef Z7_USE_ZSTD_ORIG_DECODER
-      _decoded_Info_Defined = true;
-      _decoded_Info = decoder->_state.info;
-      // NumDataFrames_Decoded = decoder->_state.info.num_DataFrames;
-      // NumSkipFrames_Decoded = decoder->_state.info.num_SkipFrames;
-      const UInt64 inSize = decoder->_inProcessed;
-#else
-      const UInt64 inSize = decoder->GetInputProcessedSize();
-#endif
-      _phySize_Decoded = inSize;
-      _phySize_Decoded_Defined = true;
-      
-      _unpackSize_Defined = true;
-      _unpackSize = outSize;
-
-      // RINOK(
-      lps.Interface()->SetRatioInfo(&inSize, &outSize);
-      
 #ifdef Z7_USE_ZSTD_ORIG_DECODER
       if (hres == S_OK)
         opRes = NExtract::NOperationResult::kOK;
 #else
-      if (decoder->ResInfo.decode_SRes == SZ_ERROR_CRC)
+      if (decodeSRes == SZ_ERROR_CRC)
       {
         opRes = NExtract::NOperationResult::kCRCError;
       }
-      else if (decoder->ResInfo.decode_SRes == SZ_ERROR_NO_ARCHIVE)
+      else if (decodeSRes == SZ_ERROR_NO_ARCHIVE)
       {
         _isArc = false;
         opRes = NExtract::NOperationResult::kIsNotArc;
       }
-      else if (decoder->ResInfo.decode_SRes == SZ_ERROR_INPUT_EOF)
+      else if (decodeSRes == SZ_ERROR_INPUT_EOF)
         opRes = NExtract::NOperationResult::kUnexpectedEnd;
       else
       {
-        if (hres == S_OK && decoder->ResInfo.decode_SRes == SZ_OK)
+        if (hres == S_OK && decodeSRes == SZ_OK)
           opRes = NExtract::NOperationResult::kOK;
-        if (decoder->ResInfo.extraSize)
+        if (extraSize)
         {
           // if (inSize == 0) _isArc = false;
           opRes = NExtract::NOperationResult::kDataAfterEnd;
         }
-        /*
-        if (decoder->ResInfo.unexpededEnd)
-          opRes = NExtract::NOperationResult::kUnexpectedEnd;
-        */
       }
 #endif
     }
@@ -912,14 +1076,12 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 
 Z7_COM7F_IMF(CHandler::SetProperties(const wchar_t * const *names, const PROPVARIANT *values, UInt32 numProps))
 {
-  // return _props.SetProperties(names, values, numProps);
   // _smallMode = false;
   _disableHash = false;
   _parseMode = false;
+  _tarPosixMode = false;
+  _level = kZstdDefaultLevel;
   // _parseMode = true; // for debug
-#ifdef Z7_USE_ZSTD_COMPRESSION
-  _props.Init();
-#endif
 
   for (UInt32 i = 0; i < numProps; i++)
   {
@@ -946,18 +1108,32 @@ Z7_COM7F_IMF(CHandler::SetProperties(const wchar_t * const *names, const PROPVAR
         return E_INVALIDARG;
       continue;
     }
-#ifdef Z7_USE_ZSTD_COMPRESSION
-    /*
-    if (name.IsEqualTo("small"))
+    if (name.IsPrefixedBy_Ascii_NoCase("x"))
     {
-      bool smallMode = true;
-      RINOK(PROPVARIANT_to_bool(value, smallMode))
-      _smallMode = smallMode;
+      name.Delete(0, 1);
+      UInt32 level = kZstdDefaultLevel;
+      RINOK(ParsePropToUInt32(name, value, level))
+      if (level > (UInt32)ZSTD_maxCLevel())
+        return E_INVALIDARG;
+      _level = level;
       continue;
     }
-    */
-    RINOK(_props.SetProperty(names[i], value))
-#endif
+    if (name.IsEqualTo_Ascii_NoCase("m"))
+    {
+      if (value.vt != VT_BSTR || value.bstrVal == NULL)
+        return E_INVALIDARG;
+      const UString method = value.bstrVal;
+      if (method.IsEqualTo_Ascii_NoCase("pax") ||
+          method.IsEqualTo_Ascii_NoCase("posix"))
+        _tarPosixMode = true;
+      else if (method.IsEqualTo_Ascii_NoCase("gnu") ||
+          method.IsEqualTo_Ascii_NoCase("zstd") ||
+          method.IsEqualTo_Ascii_NoCase("zstandard"))
+        _tarPosixMode = false;
+      else
+        return E_INVALIDARG;
+      continue;
+    }
   }
   return S_OK;
 }
@@ -965,7 +1141,116 @@ Z7_COM7F_IMF(CHandler::SetProperties(const wchar_t * const *names, const PROPVAR
 
 
 
-#ifdef Z7_USE_ZSTD_COMPRESSION
+#ifndef Z7_EXTRACT_ONLY
+
+Z7_CLASS_IMP_COM_1(CZstdEncodeOutStream, ISequentialOutStream)
+  CMyComPtr<ISequentialOutStream> _stream;
+  ZSTD_CCtx *_ctx;
+  CByteBuffer _outBuf;
+  bool _finished;
+
+public:
+  CZstdEncodeOutStream():
+      _ctx(NULL),
+      _finished(false)
+      {}
+  ~CZstdEncodeOutStream()
+  {
+    if (_ctx)
+      ZSTD_freeCCtx(_ctx);
+  }
+
+  HRESULT Init(ISequentialOutStream *stream, UInt32 level);
+  HRESULT Finish();
+};
+
+HRESULT CZstdEncodeOutStream::Init(ISequentialOutStream *stream, UInt32 level)
+{
+  _stream = stream;
+  _finished = false;
+  if (!stream)
+    return E_FAIL;
+  if (!_ctx)
+  {
+    _ctx = ZSTD_createCCtx();
+    if (!_ctx)
+      return E_OUTOFMEMORY;
+  }
+  size_t res = ZSTD_CCtx_reset(_ctx, ZSTD_reset_session_and_parameters);
+  if (ZSTD_isError(res))
+    return E_FAIL;
+  res = ZSTD_CCtx_setParameter(_ctx, ZSTD_c_compressionLevel, (int)level);
+  if (ZSTD_isError(res))
+    return E_INVALIDARG;
+  _outBuf.Alloc(ZSTD_CStreamOutSize());
+  return S_OK;
+}
+
+Z7_COM7F_IMF(CZstdEncodeOutStream::Write(const void *data, UInt32 size, UInt32 *processedSize))
+{
+  COM_TRY_BEGIN
+
+  if (processedSize)
+    *processedSize = 0;
+  if (_finished || !_ctx || !_stream)
+    return E_FAIL;
+
+  ZSTD_inBuffer input = { data, size, 0 };
+  while (input.pos < input.size)
+  {
+    ZSTD_outBuffer output = { _outBuf, _outBuf.Size(), 0 };
+    const size_t res = ZSTD_compressStream2(_ctx, &output, &input, ZSTD_e_continue);
+    if (ZSTD_isError(res))
+      return E_FAIL;
+    if (output.pos != 0)
+      RINOK(WriteStream(_stream, _outBuf, output.pos))
+  }
+
+  if (processedSize)
+    *processedSize = size;
+  return S_OK;
+
+  COM_TRY_END
+}
+
+HRESULT CZstdEncodeOutStream::Finish()
+{
+  if (_finished)
+    return S_OK;
+  if (!_ctx || !_stream)
+    return E_FAIL;
+
+  ZSTD_inBuffer input = { NULL, 0, 0 };
+  for (;;)
+  {
+    ZSTD_outBuffer output = { _outBuf, _outBuf.Size(), 0 };
+    const size_t res = ZSTD_compressStream2(_ctx, &output, &input, ZSTD_e_end);
+    if (ZSTD_isError(res))
+      return E_FAIL;
+    if (output.pos != 0)
+      RINOK(WriteStream(_stream, _outBuf, output.pos))
+    if (res == 0)
+      break;
+  }
+  _finished = true;
+  return S_OK;
+}
+
+static bool IsTarZstdUpdate(IArchiveUpdateCallback *updateCallback)
+{
+  CMyComPtr<IArchiveGetRootProps> rootProps;
+  updateCallback->QueryInterface(IID_IArchiveGetRootProps, (void **)&rootProps);
+  if (!rootProps)
+    return false;
+
+  NCOM::CPropVariant prop;
+  if (rootProps->GetRootProp(kpidArcFileName, &prop) != S_OK)
+    return false;
+  if (prop.vt != VT_BSTR || prop.bstrVal == NULL)
+    return false;
+  return IsTarZstdName(prop.bstrVal);
+}
+
 
 Z7_COM7F_IMF(CHandler::GetFileTimeType(UInt32 *timeType))
 {
@@ -980,8 +1265,29 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
 {
   COM_TRY_BEGIN
 
+  if (!updateCallback)
+    return E_FAIL;
+
+  if (IsTarZstdUpdate(updateCallback))
+  {
+    CMyComPtr2_Create<ISequentialOutStream, CZstdEncodeOutStream> zstdStream;
+    RINOK(zstdStream->Init(outStream, _level))
+
+    CMyComPtr2_Create<IOutArchive, NTar::CHandler> tarHandler;
+    const wchar_t *name = L"m";
+    NCOM::CPropVariant value(_tarPosixMode ? L"posix" : L"gnu");
+    CMyComPtr<ISetProperties> setProperties;
+    tarHandler.Interface()->QueryInterface(IID_ISetProperties, (void **)&setProperties);
+    if (!setProperties)
+      return E_FAIL;
+    RINOK(setProperties->SetProperties(&name, &value, 1))
+    RINOK(tarHandler.Interface()->UpdateItems(zstdStream.Interface(), numItems, updateCallback))
+    return zstdStream->Finish();
+  }
+
   if (numItems != 1)
     return E_INVALIDARG;
+
   {
     CMyComPtr<IStreamSetRestriction> setRestriction;
     outStream->QueryInterface(IID_IStreamSetRestriction, (void **)&setRestriction);
@@ -990,8 +1296,6 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
   }
   Int32 newData, newProps;
   UInt32 indexInArchive;
-  if (!updateCallback)
-    return E_FAIL;
   RINOK(updateCallback->GetUpdateItemInfo(0, &newData, &newProps, &indexInArchive))
  
   if (IntToBool(newProps))
@@ -1016,10 +1320,6 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
       size = prop.uhVal.QuadPart;
     }
 
-    if (!_props.MethodName.IsEmpty()
-        && !_props.MethodName.IsEqualTo_Ascii_NoCase("zstd"))
-      return E_INVALIDARG;
-
     {
       CMyComPtr<ISequentialInStream> fileInStream;
       RINOK(updateCallback->GetStream(0, &fileInStream))
@@ -1037,59 +1337,13 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
       }
       RINOK(updateCallback->SetTotal(size))
 
-      CMethodProps props2 = _props;
-
-#ifndef Z7_ST
-      /*
-      CSingleMethodProps (_props)
-      derives from
-      CMethodProps (props2)
-      So we transfer additional variable (num Threads) to CMethodProps list of properties
-      */
-
-      UInt32 numThreads = _props._numThreads;
-
-      if (numThreads > Z7_ZSTDMT_NBWORKERS_MAX)
-          numThreads = Z7_ZSTDMT_NBWORKERS_MAX;
-
-      if (_props.FindProp(NCoderPropID::kNumThreads) < 0)
-      {
-        if (!_props._numThreads_WasForced
-            && numThreads >= 1
-            && _props._memUsage_WasSet)
-        {
-          NCompress::NZstd::CEncoderProps zstdProps;
-          RINOK(zstdProps.SetFromMethodProps(_props))
-          ZstdEncProps_NormalizeFull(&zstdProps.EncProps);
-          numThreads = ZstdEncProps_GetNumThreads_for_MemUsageLimit(
-              &zstdProps.EncProps, _props._memUsage_Compress, numThreads);
-        }
-        props2.AddProp_NumThreads(numThreads);
-      }
-
-#endif // Z7_ST
-
       CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
       lps->Init(updateCallback, true);
       {
-        CMyComPtr2_Create<ICompressCoder, NCompress::NZstd::CEncoder> encoder;
-        // size = 1 << 24; // for debug
-        RINOK(props2.SetCoderProps(encoder.ClsPtr(), size != (UInt64)(Int64)-1 ? &size : NULL))
-        // encoderSpec->_props.SmallFileOpt = _smallMode;
-        // we must set kExpectedDataSize just before Code().
-        encoder->SrcSizeHint64 = size;
-        /*
-        CMyComPtr<ICompressSetCoderPropertiesOpt> optProps;
-        _compressEncoder->QueryInterface(IID_ICompressSetCoderPropertiesOpt, (void**)&optProps);
-        if (optProps)
-        {
-          PROPID propID = NCoderPropID::kExpectedDataSize;
-          NWindows::NCOM::CPropVariant prop = (UInt64)size;
-          // RINOK(optProps->SetCoderPropertiesOpt(&propID, &prop, 1))
-          RINOK(encoderSpec->SetCoderPropertiesOpt(&propID, &prop, 1))
-        }
-        */
-        RINOK(encoder.Interface()->Code(fileInStream, outStream, NULL, NULL, lps))
+        CMyComPtr2_Create<ISequentialOutStream, CZstdEncodeOutStream> zstdStream;
+        RINOK(zstdStream->Init(outStream, _level))
+        RINOK(NCompress::CopyStream(fileInStream, zstdStream.Interface(), lps))
+        RINOK(zstdStream->Finish())
       }
     }
     return updateCallback->SetOperationResult(NArchive::NUpdate::NOperationResult::kOK);
@@ -1121,27 +1375,11 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
 
 
 
-#ifndef Z7_USE_ZSTD_COMPRESSION
-#undef  IMP_CreateArcOut
-#define IMP_CreateArcOut
-#undef  CreateArcOut
-#define CreateArcOut NULL
-#endif
-
-#ifdef Z7_USE_ZSTD_COMPRESSION
 REGISTER_ARC_IO(
-  "zstd2", "zst tzst", "* .tar", 0xe + 1,
+  "zstd", "tzs zst tzst tzstd", ".tar * .tar .tar", 0xe,
   k_Signature, 0
   , NArcInfoFlags::kKeepName
   , 0
   , NULL)
-#else
-REGISTER_ARC_IO(
-  "zstd", "zst tzst", "* .tar", 0xe,
-  k_Signature, 0
-  , NArcInfoFlags::kKeepName
-  , 0
-  , NULL)
-#endif
 
 }}

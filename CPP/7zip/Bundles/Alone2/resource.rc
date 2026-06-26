@@ -1,6 +1,6 @@
 #include "../../MyVersionInfo.rc"
 
-MY_VERSION_INFO_APP("7-Zip Standalone 2 Console", "7zz")
+MY_VERSION_INFO_APP("WinZST Console", "winzst")
 
 #ifndef UNDER_CE
 1  24  MOVEABLE PURE   "../../UI/Console/Console.manifest"

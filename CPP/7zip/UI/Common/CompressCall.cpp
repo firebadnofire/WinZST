@@ -31,7 +31,7 @@ using namespace NWindows;
 #define MY_TRY_FINISH_VOID } \
   catch(...) { ErrorMessageHRESULT(E_FAIL); }
 
-#define k7zGui  "7zG.exe"
+#define k7zGui  "WinZSTG.exe"
 
 // 21.07 : we can disable wildcard
 // #define ISWITCH_NO_WILDCARD_POSTFIX "w-"
@@ -57,7 +57,7 @@ UString GetQuotedString(const UString &s)
 
 static void ErrorMessage(LPCWSTR message)
 {
-  MessageBoxW(g_HWND, message, L"7-Zip", MB_ICONERROR | MB_OK);
+  MessageBoxW(g_HWND, message, L"WinZST", MB_ICONERROR | MB_OK);
 }
 
 static void ErrorMessageHRESULT(HRESULT res, LPCWSTR s = NULL)

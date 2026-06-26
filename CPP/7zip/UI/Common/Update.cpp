@@ -180,8 +180,8 @@ FString CArchivePath::GetTempPath() const
   return path;
 }
 
-static const char * const kDefaultArcType = "7z";
-static const char * const kDefaultArcExt = "7z";
+static const char * const kDefaultArcType = "zstd";
+static const char * const kDefaultArcExt = "tzs";
 static const char * const kSFXExtension =
   #ifdef _WIN32
     "exe";
@@ -1727,7 +1727,7 @@ Z7_DIAGNOSTIC_IGNORE_CAST_FUNCTION
     LPMAPISENDDOCUMENTS fnSend = (LPMAPISENDDOCUMENTS)mapiLib.GetProc("MAPISendDocuments");
     if (fnSend == 0)
     {
-      errorInfo.SetFromLastError)("7-Zip cannot find MAPISendDocuments function");
+      errorInfo.SetFromLastError)("WinZST cannot find MAPISendDocuments function");
       return errorInfo.Get_HRESULT_Error();
     }
     */
@@ -1793,7 +1793,7 @@ Z7_DIAGNOSTIC_IGNORE_CAST_FUNCTION
      "MAPISendMail");
     if (!sendMail)
     {
-      errorInfo.SetFromLastError("7-Zip cannot find MAPISendMail function");
+      errorInfo.SetFromLastError("WinZST cannot find MAPISendMail function");
       return errorInfo.Get_HRESULT_Error();
     }
 

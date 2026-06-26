@@ -198,6 +198,14 @@ public:
   void SetArchiveName(const UString &name);
   int FindRegistryFormat(const UString &name);
   unsigned FindRegistryFormat_Always(const UString &name);
+  int FindFormatIndexByName(const char *name);
+  int GetTarFamilyMethodID();
+  bool IsTarZstdMethod();
+  bool IsTarCompressedMethod();
+  const char *GetTarFamilyExtension();
+  unsigned GetFinalFormatIndex();
+  void SetTarFamilyArchiveName();
+  bool RemoveKnownArchiveSuffix(UString &fileName);
 
   const CArcInfoEx &Get_ArcInfoEx()
   {
@@ -364,7 +372,7 @@ public:
 
   void MessageBoxError(LPCWSTR message)
   {
-    MessageBoxW(*this, message, L"7-Zip", MB_ICONERROR);
+    MessageBoxW(*this, message, L"WinZST", MB_ICONERROR);
   }
 
   void ShowOptionsString();

@@ -122,15 +122,20 @@ DECLARE_AND_SET_CLIENT_VERSION_VAR
   #define PROG_POSTFIX_2  ""
 #endif
 
+#ifdef Z7_PROG_VARIANT_Z
+  #define PROG_COMMAND_NAME "winzst"
+#else
+  #define PROG_COMMAND_NAME "7z" PROG_POSTFIX
+#endif
 
-static const char * const kCopyrightString = "\n7-Zip"
+static const char * const kCopyrightString = "\nWinZST"
   PROG_POSTFIX_2
   " " MY_VERSION_CPU
   " : " MY_COPYRIGHT_DATE "\n";
 
 static const char * const kHelpString =
-    "Usage: 7z"
-    PROG_POSTFIX
+    "Usage: "
+    PROG_COMMAND_NAME
     " <command> [<switches>...] <archive_name> [<file_names>...] [@listfile]\n"
     "\n"
     "<Commands>\n"
@@ -209,7 +214,7 @@ static const char * const kHelpString =
 
 static const char * const kEverythingIsOk = "Everything is Ok";
 static const char * const kUserErrorMessage = "Incorrect command line";
-static const char * const kNoFormats = "7-Zip cannot find the code that works with archives.";
+static const char * const kNoFormats = "WinZST cannot find the code that works with archives.";
 static const char * const kUnsupportedArcTypeMessage = "Unsupported archive type";
 // static const char * const kUnsupportedUpdateArcType = "Can't create archive for that type";
 

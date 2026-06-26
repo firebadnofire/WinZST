@@ -116,6 +116,7 @@ AR_COMMON_OBJS = \
   $O\OutStreamWithSha1.obj \
   $O\HandlerOut.obj \
   $O\ParseProperties.obj \
+  $O\TarWrapUpdate.obj \
 
 7Z_OBJS = \
   $O\7zCompressionMode.obj \
@@ -240,6 +241,32 @@ COMPRESS_OBJS = \
   $O\ZlibEncoder.obj \
   $O\ZDecoder.obj \
   $O\ZstdDecoder.obj \
+
+ZSTD_COMMON_OBJS = \
+  $O\debug.obj \
+  $O\entropy_common.obj \
+  $O\error_private.obj \
+  $O\fse_decompress.obj \
+  $O\pool.obj \
+  $O\threading.obj \
+  $O\xxhash.obj \
+  $O\zstd_common.obj \
+
+ZSTD_COMPRESS_OBJS = \
+  $O\fse_compress.obj \
+  $O\hist.obj \
+  $O\huf_compress.obj \
+  $O\zstdmt_compress.obj \
+  $O\zstd_compress.obj \
+  $O\zstd_compress_literals.obj \
+  $O\zstd_compress_sequences.obj \
+  $O\zstd_compress_superblock.obj \
+  $O\zstd_double_fast.obj \
+  $O\zstd_fast.obj \
+  $O\zstd_lazy.obj \
+  $O\zstd_ldm.obj \
+  $O\zstd_opt.obj \
+  $O\zstd_preSplit.obj \
 
 CRYPTO_OBJS = \
   $O\7zAes.obj \

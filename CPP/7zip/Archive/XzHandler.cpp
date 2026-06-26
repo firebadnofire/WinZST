@@ -25,6 +25,7 @@
 #include "IArchive.h"
 
 #include "Common/HandlerOut.h"
+#include "Common/TarWrapUpdate.h"
 
 using namespace NWindows;
 
@@ -32,6 +33,12 @@ namespace NArchive {
 namespace NXz {
 
 #define k_LZMA2_Name "LZMA2"
+
+static const char * const kTarXzSuffixes[] =
+{
+    ".tar.xz"
+  , ".txz"
+};
 
 
 struct CBlockInfo
@@ -81,6 +88,7 @@ Z7_class_CHandler_final:
   bool _isArc;
   bool _needSeekToStart;
   bool _firstBlockWasRead;
+  bool _tarMode;
   SRes _stat2_decode_SRes;
 
   CXzStatInfo _stat;    // it's stat from backward parsing
@@ -94,6 +102,7 @@ Z7_class_CHandler_final:
   }
   
   AString _methodsString;
+  UString _subFileName;
 
 
   #ifndef Z7_EXTRACT_ONLY
@@ -123,6 +132,14 @@ Z7_class_CHandler_final:
   HRESULT SetProperty(const wchar_t *name, const PROPVARIANT &value);
 
   HRESULT Open2(IInStream *inStream, /* UInt32 flags, */ IArchiveOpenCallback *callback);
+
+  #ifndef Z7_EXTRACT_ONLY
+  HRESULT EncodeStream(ISequentialOutStream *outStream,
+      ISequentialInStream *fileInStream,
+      UInt64 dataSize,
+      IArchiveUpdateCallback *updateCallback,
+      bool setOperationResult);
+  #endif
 
   HRESULT Decode(NCompress::NXz::CDecoder &decoder,
       ISequentialInStream *seqInStream,
@@ -179,6 +196,7 @@ public:
 
 
 CHandler::CHandler():
+    _tarMode(false),
     _blocks(NULL),
     _blocksArraySize(0)
 {
@@ -382,8 +400,8 @@ Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
 
     case kpidMainSubfile:
     {
-      // debug only, comment it:
-      // if (_blocks) prop = (UInt32)0;
+      if (_tarMode)
+        prop = (UInt32)0;
       break;
     }
     default: break;
@@ -406,6 +424,10 @@ Z7_COM7F_IMF(CHandler::GetProperty(UInt32, PROPID propID, PROPVARIANT *value))
   NCOM::CPropVariant prop;
   switch (propID)
   {
+    case kpidPath:
+      if (_tarMode && !_subFileName.IsEmpty())
+        prop = _subFileName;
+      break;
     case kpidSize: if (stat && stat->UnpackSize_Defined) prop = stat->OutSize; break;
     case kpidPackSize: if (stat) prop = stat->InSize; break;
     case kpidMethod: if (!_methodsString.IsEmpty()) prop = _methodsString; break;
@@ -679,7 +701,24 @@ Z7_COM7F_IMF(CHandler::Open(IInStream *inStream, const UInt64 *, IArchiveOpenCal
   COM_TRY_BEGIN
   {
     Close();
-    return Open2(inStream, callback);
+    UString subFileName;
+    if (callback)
+    {
+      CMyComPtr<IArchiveOpenVolumeCallback> volumeCallback;
+      callback->QueryInterface(IID_IArchiveOpenVolumeCallback, (void **)&volumeCallback);
+      if (volumeCallback)
+      {
+        NCOM::CPropVariant prop;
+        if (volumeCallback->GetProperty(kpidName, &prop) == S_OK
+            && prop.vt == VT_BSTR
+            && prop.bstrVal != NULL)
+          NTarWrap::GetTarSubFileName(prop.bstrVal, kTarXzSuffixes, Z7_ARRAY_SIZE(kTarXzSuffixes), subFileName);
+      }
+    }
+    RINOK(Open2(inStream, callback))
+    _tarMode = !subFileName.IsEmpty();
+    _subFileName = subFileName;
+    return S_OK;
   }
   COM_TRY_END
 }
@@ -704,6 +743,8 @@ Z7_COM7F_IMF(CHandler::Close())
   _isArc = false;
   _needSeekToStart = false;
   _firstBlockWasRead = false;
+  _tarMode = false;
+  _subFileName.Empty();
 
    _methodsString.Empty();
   _stream.Release();
@@ -1086,6 +1127,161 @@ Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 
 #ifndef Z7_EXTRACT_ONLY
 
+HRESULT CHandler::EncodeStream(ISequentialOutStream *outStream,
+    ISequentialInStream *fileInStream,
+    UInt64 dataSize,
+    IArchiveUpdateCallback *updateCallback,
+    bool setOperationResult)
+{
+  if (!fileInStream)
+    return S_FALSE;
+
+  {
+    CMyComPtr<IStreamGetSize> streamGetSize;
+    fileInStream->QueryInterface(IID_IStreamGetSize, (void **)&streamGetSize);
+    if (streamGetSize)
+    {
+      UInt64 size;
+      if (streamGetSize->GetSize(&size) == S_OK)
+        dataSize = size;
+    }
+  }
+
+  CMyComPtr2_Create<ICompressCoder, NCompress::NXz::CEncoder> encoder;
+
+  CXzProps &xzProps = encoder->xzProps;
+  CLzma2EncProps &lzma2Props = xzProps.lzma2Props;
+
+  lzma2Props.lzmaProps.level = GetLevel();
+
+  xzProps.reduceSize = dataSize;
+
+  #ifndef Z7_ST
+
+#ifdef _WIN32
+  // we don't use chunk multithreading inside lzma2 stream.
+  // so we don't set xzProps.lzma2Props.numThreadGroups.
+  if (_numThreadGroups > 1)
+    xzProps.numThreadGroups = _numThreadGroups;
+#endif
+
+  UInt32 numThreads = _numThreads;
+
+  const UInt32 kNumThreads_Max = 1024;
+  if (numThreads > kNumThreads_Max)
+    numThreads = kNumThreads_Max;
+
+  if (!_numThreads_WasForced
+      && _numThreads >= 1
+      && _memUsage_WasSet)
+  {
+    COneMethodInfo oneMethodInfo;
+    if (!_methods.IsEmpty())
+      oneMethodInfo = _methods[0];
+
+    SetGlobalLevelTo(oneMethodInfo);
+
+    const bool numThreads_WasSpecifiedInMethod = (oneMethodInfo.Get_NumThreads() >= 0);
+    if (!numThreads_WasSpecifiedInMethod)
+    {
+      // here we set the (NCoderPropID::kNumThreads) property in each method, only if there is no such property already
+      CMultiMethodProps::SetMethodThreadsTo_IfNotFinded(oneMethodInfo, numThreads);
+    }
+
+    UInt64 cs = _numSolidBytes;
+    if (cs != XZ_PROPS_BLOCK_SIZE_AUTO)
+      oneMethodInfo.AddProp_BlockSize2(cs);
+    cs = oneMethodInfo.Get_Xz_BlockSize();
+
+    if (cs != XZ_PROPS_BLOCK_SIZE_AUTO &&
+        cs != XZ_PROPS_BLOCK_SIZE_SOLID)
+    {
+      const UInt32 lzmaThreads = oneMethodInfo.Get_Lzma_NumThreads();
+      const UInt32 numBlockThreads_Original = numThreads / lzmaThreads;
+
+      if (numBlockThreads_Original > 1)
+      {
+        UInt32 numBlockThreads = numBlockThreads_Original;
+        {
+          const UInt64 lzmaMemUsage = oneMethodInfo.Get_Lzma_MemUsage(false);
+          for (; numBlockThreads > 1; numBlockThreads--)
+          {
+            UInt64 size = numBlockThreads * (lzmaMemUsage + cs);
+            UInt32 numPackChunks = numBlockThreads + (numBlockThreads / 8) + 1;
+            if (cs < ((UInt32)1 << 26)) numPackChunks++;
+            if (cs < ((UInt32)1 << 24)) numPackChunks++;
+            if (cs < ((UInt32)1 << 22)) numPackChunks++;
+            size += numPackChunks * cs;
+            if (size <= _memUsage_Compress)
+              break;
+          }
+        }
+        if (numBlockThreads == 0)
+          numBlockThreads = 1;
+        if (numBlockThreads != numBlockThreads_Original)
+          numThreads = numBlockThreads * lzmaThreads;
+      }
+    }
+  }
+  xzProps.numTotalThreads = (int)numThreads;
+
+  #endif // Z7_ST
+
+  xzProps.blockSize = _numSolidBytes;
+  if (_numSolidBytes == XZ_PROPS_BLOCK_SIZE_SOLID)
+  {
+    xzProps.lzma2Props.blockSize = LZMA2_ENC_PROPS_BLOCK_SIZE_SOLID;
+  }
+
+  RINOK(encoder->SetCheckSize(_crcSize))
+
+  {
+    CXzFilterProps &filter = xzProps.filterProps;
+
+    if (_filterId == XZ_ID_Delta)
+    {
+      bool deltaDefined = false;
+      FOR_VECTOR (j, _filterMethod.Props)
+      {
+        const CProp &prop = _filterMethod.Props[j];
+        if (prop.Id == NCoderPropID::kDefaultProp && prop.Value.vt == VT_UI4)
+        {
+          UInt32 delta = (UInt32)prop.Value.ulVal;
+          if (delta < 1 || delta > 256)
+            return E_INVALIDARG;
+          filter.delta = delta;
+          deltaDefined = true;
+        }
+        else
+          return E_INVALIDARG;
+      }
+      if (!deltaDefined)
+        return E_INVALIDARG;
+    }
+    filter.id = _filterId;
+  }
+
+  FOR_VECTOR (i, _methods)
+  {
+    COneMethodInfo &m = _methods[i];
+
+    FOR_VECTOR (j, m.Props)
+    {
+      const CProp &prop = m.Props[j];
+      RINOK(encoder->SetCoderProp(prop.Id, prop.Value))
+    }
+  }
+
+  RINOK(updateCallback->SetTotal(dataSize))
+  CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
+  lps->Init(updateCallback, true);
+  RINOK(encoder.Interface()->Code(fileInStream, outStream, NULL, NULL, lps))
+
+  if (setOperationResult)
+    return updateCallback->SetOperationResult(NArchive::NUpdate::NOperationResult::kOK);
+  return S_OK;
+}
+
 Z7_COM7F_IMF(CHandler::GetFileTimeType(UInt32 *timeType))
 {
   *timeType = GET_FileTimeType_NotDefined_for_GetFileTimeType;
@@ -1098,6 +1294,26 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
     IArchiveUpdateCallback *updateCallback))
 {
   COM_TRY_BEGIN
+
+  if (!updateCallback)
+    return E_FAIL;
+
+  if (NTarWrap::IsTarUpdate(updateCallback, kTarXzSuffixes, Z7_ARRAY_SIZE(kTarXzSuffixes)))
+  {
+    {
+      Z7_DECL_CMyComPtr_QI_FROM(
+          IStreamSetRestriction,
+          setRestriction, outStream)
+      if (setRestriction)
+        RINOK(setRestriction->SetRestriction(0, 0))
+    }
+
+    NTarWrap::CTempTarInStream tarStream;
+    RINOK(tarStream.Create(numItems, updateCallback, false))
+
+    return EncodeStream(outStream, tarStream.GetStream(), tarStream.GetSize(),
+        updateCallback, false);
+  }
 
   if (numItems == 0)
   {
@@ -1120,8 +1336,6 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
 
   Int32 newData, newProps;
   UInt32 indexInArchive;
-  if (!updateCallback)
-    return E_FAIL;
   RINOK(updateCallback->GetUpdateItemInfo(0, &newData, &newProps, &indexInArchive))
 
   if (IntToBool(newProps))
@@ -1146,163 +1360,9 @@ Z7_COM7F_IMF(CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numIt
       dataSize = prop.uhVal.QuadPart;
     }
 
-    CMyComPtr2_Create<ICompressCoder, NCompress::NXz::CEncoder> encoder;
-
-    CXzProps &xzProps = encoder->xzProps;
-    CLzma2EncProps &lzma2Props = xzProps.lzma2Props;
-
-    lzma2Props.lzmaProps.level = GetLevel();
-
-    xzProps.reduceSize = dataSize;
-    /*
-    {
-      NCOM::CPropVariant prop = (UInt64)dataSize;
-      RINOK(encoder->SetCoderProp(NCoderPropID::kReduceSize, prop))
-    }
-    */
-
-    #ifndef Z7_ST
-
-#ifdef _WIN32
-    // we don't use chunk multithreading inside lzma2 stream.
-    // so we don't set xzProps.lzma2Props.numThreadGroups.
-    if (_numThreadGroups > 1)
-      xzProps.numThreadGroups = _numThreadGroups;
-#endif
-    
-    UInt32 numThreads = _numThreads;
-
-    const UInt32 kNumThreads_Max = 1024;
-    if (numThreads > kNumThreads_Max)
-      numThreads = kNumThreads_Max;
-
-    if (!_numThreads_WasForced
-        && _numThreads >= 1
-        && _memUsage_WasSet)
-    {
-      COneMethodInfo oneMethodInfo;
-      if (!_methods.IsEmpty())
-        oneMethodInfo = _methods[0];
-
-      SetGlobalLevelTo(oneMethodInfo);
-
-      const bool numThreads_WasSpecifiedInMethod = (oneMethodInfo.Get_NumThreads() >= 0);
-      if (!numThreads_WasSpecifiedInMethod)
-      {
-        // here we set the (NCoderPropID::kNumThreads) property in each method, only if there is no such property already
-        CMultiMethodProps::SetMethodThreadsTo_IfNotFinded(oneMethodInfo, numThreads);
-      }
-
-      // printf("\n====== GetProcessGroupAffinity : \n");
-
-      UInt64 cs = _numSolidBytes;
-      if (cs != XZ_PROPS_BLOCK_SIZE_AUTO)
-        oneMethodInfo.AddProp_BlockSize2(cs);
-      cs = oneMethodInfo.Get_Xz_BlockSize();
-
-      if (cs != XZ_PROPS_BLOCK_SIZE_AUTO &&
-          cs != XZ_PROPS_BLOCK_SIZE_SOLID)
-      {
-        const UInt32 lzmaThreads = oneMethodInfo.Get_Lzma_NumThreads();
-        const UInt32 numBlockThreads_Original = numThreads / lzmaThreads;
-
-        if (numBlockThreads_Original > 1)
-        {
-          UInt32 numBlockThreads = numBlockThreads_Original;
-          {
-            const UInt64 lzmaMemUsage = oneMethodInfo.Get_Lzma_MemUsage(false);
-            for (; numBlockThreads > 1; numBlockThreads--)
-            {
-              UInt64 size = numBlockThreads * (lzmaMemUsage + cs);
-              UInt32 numPackChunks = numBlockThreads + (numBlockThreads / 8) + 1;
-              if (cs < ((UInt32)1 << 26)) numPackChunks++;
-              if (cs < ((UInt32)1 << 24)) numPackChunks++;
-              if (cs < ((UInt32)1 << 22)) numPackChunks++;
-              size += numPackChunks * cs;
-              // printf("\nnumBlockThreads = %d, size = %d\n", (unsigned)(numBlockThreads), (unsigned)(size >> 20));
-              if (size <= _memUsage_Compress)
-                break;
-            }
-          }
-          if (numBlockThreads == 0)
-            numBlockThreads = 1;
-          if (numBlockThreads != numBlockThreads_Original)
-            numThreads = numBlockThreads * lzmaThreads;
-        }
-      }
-    }
-    xzProps.numTotalThreads = (int)numThreads;
-
-    #endif // Z7_ST
-
-
-    xzProps.blockSize = _numSolidBytes;
-    if (_numSolidBytes == XZ_PROPS_BLOCK_SIZE_SOLID)
-    {
-      xzProps.lzma2Props.blockSize = LZMA2_ENC_PROPS_BLOCK_SIZE_SOLID;
-    }
-
-    RINOK(encoder->SetCheckSize(_crcSize))
-
-    {
-      CXzFilterProps &filter = xzProps.filterProps;
-      
-      if (_filterId == XZ_ID_Delta)
-      {
-        bool deltaDefined = false;
-        FOR_VECTOR (j, _filterMethod.Props)
-        {
-          const CProp &prop = _filterMethod.Props[j];
-          if (prop.Id == NCoderPropID::kDefaultProp && prop.Value.vt == VT_UI4)
-          {
-            UInt32 delta = (UInt32)prop.Value.ulVal;
-            if (delta < 1 || delta > 256)
-              return E_INVALIDARG;
-            filter.delta = delta;
-            deltaDefined = true;
-          }
-          else
-            return E_INVALIDARG;
-        }
-        if (!deltaDefined)
-          return E_INVALIDARG;
-      }
-      filter.id = _filterId;
-    }
-
-    FOR_VECTOR (i, _methods)
-    {
-      COneMethodInfo &m = _methods[i];
-
-      FOR_VECTOR (j, m.Props)
-      {
-        const CProp &prop = m.Props[j];
-        RINOK(encoder->SetCoderProp(prop.Id, prop.Value))
-      }
-    }
-
-    {
-      CMyComPtr<ISequentialInStream> fileInStream;
-      RINOK(updateCallback->GetStream(0, &fileInStream))
-      if (!fileInStream)
-        return S_FALSE;
-      {
-        CMyComPtr<IStreamGetSize> streamGetSize;
-        fileInStream.QueryInterface(IID_IStreamGetSize, &streamGetSize);
-        if (streamGetSize)
-        {
-          UInt64 size;
-          if (streamGetSize->GetSize(&size) == S_OK)
-            dataSize = size;
-        }
-      }
-      RINOK(updateCallback->SetTotal(dataSize))
-      CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
-      lps->Init(updateCallback, true);
-      RINOK(encoder.Interface()->Code(fileInStream, outStream, NULL, NULL, lps))
-    }
-      
-    return updateCallback->SetOperationResult(NArchive::NUpdate::NOperationResult::kOK);
+    CMyComPtr<ISequentialInStream> fileInStream;
+    RINOK(updateCallback->GetStream(0, &fileInStream))
+    return EncodeStream(outStream, fileInStream, dataSize, updateCallback, true);
   }
 
   if (indexInArchive != 0)

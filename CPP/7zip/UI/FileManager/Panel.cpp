@@ -69,7 +69,7 @@ HWND CPanel::GetParent() const
   return h ? h : _mainWindow;
 }
 
-#define kClassName L"7-Zip::Panel"
+#define kClassName L"WinZST::Panel"
 
 
 HRESULT CPanel::Create(HWND mainWindow, HWND parentWindow, UINT id,
@@ -761,7 +761,7 @@ void CPanel::MessageBox_Error_Caption(LPCWSTR message, LPCWSTR caption) const
   { ::MessageBoxW((HWND)*this, message, caption, MB_OK | MB_ICONSTOP); }
 
 void CPanel::MessageBox_Error(LPCWSTR message) const
-  { MessageBox_Error_Caption(message, L"7-Zip"); }
+  { MessageBox_Error_Caption(message, L"WinZST"); }
 
 static UString ErrorHResult_To_Message(HRESULT errorCode)
 {
@@ -776,7 +776,7 @@ void CPanel::MessageBox_Error_HRESULT_Caption(HRESULT errorCode, LPCWSTR caption
 }
 
 void CPanel::MessageBox_Error_HRESULT(HRESULT errorCode) const
-  { MessageBox_Error_HRESULT_Caption(errorCode, L"7-Zip"); }
+  { MessageBox_Error_HRESULT_Caption(errorCode, L"WinZST"); }
 
 void CPanel::MessageBox_Error_2Lines_Message_HRESULT(LPCWSTR message, HRESULT errorCode) const
 {
@@ -790,7 +790,7 @@ void CPanel::MessageBox_LastError(LPCWSTR caption) const
   { MessageBox_Error_HRESULT_Caption(GetLastError_noZero_HRESULT(), caption); }
 
 void CPanel::MessageBox_LastError() const
-  { MessageBox_LastError(L"7-Zip"); }
+  { MessageBox_LastError(L"WinZST"); }
 
 void CPanel::MessageBox_Error_LangID(UINT resourceID) const
   { MessageBox_Error(LangString(resourceID)); }
@@ -1146,7 +1146,7 @@ void CPanel::TestArchives()
     
     extracter.ProgressDialog.CompressingMode = false;
     extracter.ProgressDialog.MainWindow = GetParent();
-    extracter.ProgressDialog.MainTitle = "7-Zip"; // LangString(IDS_APP_TITLE);
+    extracter.ProgressDialog.MainTitle = "WinZST"; // LangString(IDS_APP_TITLE);
     extracter.ProgressDialog.MainAddTitle = title + L' ';
     
     extracter.ExtractCallbackSpec->OverwriteMode = NExtract::NOverwriteMode::kAskBefore;

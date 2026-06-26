@@ -57,6 +57,7 @@ static const CContextMenuItem kMenuItems[] =
   { IDS_CONTEXT_TEST, kTest },
 
   { IDS_CONTEXT_COMPRESS, kCompress },
+  { IDS_CONTEXT_COMPRESS_TO, kCompressToTzs },
   { IDS_CONTEXT_COMPRESS_TO, kCompressTo7z },
   { IDS_CONTEXT_COMPRESS_TO, kCompressToZip },
 
@@ -242,7 +243,7 @@ bool CMenuPage::OnInit()
     if (menuItem.Flag == kCRC)
       s = "CRC SHA";
     else if (menuItem.Flag == kCRC_Cascaded)
-      s = "7-Zip > CRC SHA";
+      s = "WinZST > CRC SHA";
     if (menuItem.Flag == kOpenAs
         || menuItem.Flag == kCRC
         || menuItem.Flag == kCRC_Cascaded)
@@ -261,6 +262,9 @@ bool CMenuPage::OnInit()
         UString s2 = LangString(IDS_CONTEXT_ARCHIVE);
         switch (menuItem.Flag)
         {
+          case kCompressToTzs:
+            s2 += (".tzs");
+            break;
           case kCompressTo7z:
           case kCompressTo7zEmail:
             s2 += (".7z");
@@ -290,7 +294,7 @@ bool CMenuPage::OnInit()
 
 static void ShowMenuErrorMessage(const wchar_t *m, HWND hwnd)
 {
-  MessageBoxW(hwnd, m, L"7-Zip", MB_ICONERROR);
+  MessageBoxW(hwnd, m, L"WinZST", MB_ICONERROR);
 }
 
 #endif
