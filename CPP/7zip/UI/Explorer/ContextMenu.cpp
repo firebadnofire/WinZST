@@ -1079,7 +1079,7 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
     menu.Attach(hMenu);
     menuDestroyer.Disable();
     MyAddSubMenu(_commandMap, kMainVerb, menu, indexMenu++, currentCommandID++,
-        (UString)(_isMenuForFM ? "WinZST" : "7-Zip"),
+        (UString)"WinZST",
         popupMenu, // popupMenu.Detach(),
         bitmap);
   }
@@ -1709,10 +1709,10 @@ Z7_COMWF_B CZipExplorerCommand::GetTitle(IShellItemArray *psiItemArray, LPWSTR *
   if (IsRoot)
   {
     LoadItems(psiItemArray);
-    name = "7-Zip"; //  "New"
+    name = "WinZST"; //  "New"
   }
   else
-    name = "7-Zip item";
+    name = "WinZST item";
   
   if (!_commandMap_Cur.IsEmpty())
   {

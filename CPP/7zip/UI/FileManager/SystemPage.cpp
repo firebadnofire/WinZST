@@ -42,11 +42,11 @@ CSysString CModifiedExtInfo::GetString() const
 {
   const char *s;
   if (State == kExtState_7Zip)
-    s = "7-Zip";
+    s = "WinZST";
   else if (State == kExtState_Clear)
     s = "";
   else if (Other7Zip)
-    s = "[7-Zip]";
+    s = "[WinZST]";
   else
     return ProgramKey;
   return CSysString (s);
@@ -330,7 +330,7 @@ LONG CSystemPage::OnApply()
   _needSave = false;
   
   if (res != 0)
-    MessageBoxW(*this, NError::MyFormatMessage(res), L"7-Zip", MB_ICONERROR);
+    MessageBoxW(*this, NError::MyFormatMessage(res), L"WinZST", MB_ICONERROR);
   
   return PSNRET_NOERROR;
 }

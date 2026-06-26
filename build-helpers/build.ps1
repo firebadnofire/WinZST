@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Alone2", "Alone", "Alone7z", "Fm", "Gui", "Explorer", "Installer", "Uninstaller", "LzmaCon", "SFXCon", "SFXWin")]
+    [ValidateSet("Alone2", "Alone", "Alone7z", "Fm", "Gui", "Explorer", "Installer", "Uninstaller", "LzmaCon", "SFXCon", "SFXWin", "Setup")]
     [string]$Target = "Alone2",
 
     [ValidateSet("x64", "x86", "arm64")]
@@ -7,7 +7,9 @@ param(
 
     [bool]$Static = $true,
 
-    [switch]$CleanFirst
+    [switch]$CleanFirst,
+
+    [string]$OutputPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,35 +31,67 @@ $targetMap = @{
     "SFXWin"  = @{ RelativePath = "CPP\7zip\Bundles\SFXWin";  Output = "7z.sfx" }
 }
 
-$targetInfo = $targetMap[$Target]
-$targetDirectory = Join-Path $repoRoot $targetInfo.RelativePath
+function Invoke-BuildTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BuildTarget
+    )
 
-if (-not (Test-Path -LiteralPath $targetDirectory)) {
-    throw "Build target directory was not found: '$targetDirectory'."
+    $targetInfo = $targetMap[$BuildTarget]
+    $targetDirectory = Join-Path $repoRoot $targetInfo.RelativePath
+
+    if (-not (Test-Path -LiteralPath $targetDirectory)) {
+        throw "Build target directory was not found: '$targetDirectory'."
+    }
+
+    $nmakeArguments = @("nmake", "NEW_COMPILER=1")
+    if ($Static) {
+        $nmakeArguments += "MY_STATIC_LINK=1"
+    }
+
+    if ($CleanFirst) {
+        $cleanCommand = ($nmakeArguments + "clean") -join " "
+        Invoke-InVsEnvironment -WorkingDirectory $targetDirectory -Command $cleanCommand -Arch $Arch
+    }
+
+    $buildCommand = ($nmakeArguments + "all") -join " "
+    Invoke-InVsEnvironment -WorkingDirectory $targetDirectory -Command $buildCommand -Arch $Arch
+
+    $outputDirectory = Join-Path $targetDirectory $Arch
+    Write-Host "Expected output directory: $outputDirectory"
+    $expectedOutput = Join-Path $outputDirectory $targetInfo.Output
+    Write-Host "Expected output: $expectedOutput"
+
+    if (Test-Path -LiteralPath $outputDirectory) {
+        Get-ChildItem -LiteralPath $outputDirectory | Format-Table -AutoSize
+    }
+
+    if (-not (Test-Path -LiteralPath $expectedOutput)) {
+        throw "Expected build output was not found: '$expectedOutput'."
+    }
+
+    return $expectedOutput
 }
 
-$nmakeArguments = @("nmake", "NEW_COMPILER=1")
-if ($Static) {
-    $nmakeArguments += "MY_STATIC_LINK=1"
+if ($Target -eq "Setup") {
+    $setupDependencies = @("Installer", "Uninstaller", "Alone2", "Fm", "Gui", "Explorer")
+    foreach ($dependency in $setupDependencies) {
+        Invoke-BuildTarget -BuildTarget $dependency | Out-Null
+    }
+
+    $packageScript = Join-Path $repoRoot "build-helpers\package-installer.ps1"
+    $packageArguments = @{
+        Arch = $Arch
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        $packageArguments.OutputPath = $OutputPath
+    }
+
+    & $packageScript @packageArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Packaging the WinZST setup executable failed with exit code $LASTEXITCODE."
+    }
 }
-
-if ($CleanFirst) {
-    $cleanCommand = ($nmakeArguments + "clean") -join " "
-    Invoke-InVsEnvironment -WorkingDirectory $targetDirectory -Command $cleanCommand -Arch $Arch
-}
-
-$buildCommand = ($nmakeArguments + "all") -join " "
-Invoke-InVsEnvironment -WorkingDirectory $targetDirectory -Command $buildCommand -Arch $Arch
-
-$outputDirectory = Join-Path $targetDirectory $Arch
-Write-Host "Expected output directory: $outputDirectory"
-$expectedOutput = Join-Path $outputDirectory $targetInfo.Output
-Write-Host "Expected output: $expectedOutput"
-
-if (Test-Path -LiteralPath $outputDirectory) {
-    Get-ChildItem -LiteralPath $outputDirectory | Format-Table -AutoSize
-}
-
-if (-not (Test-Path -LiteralPath $expectedOutput)) {
-    throw "Expected build output was not found: '$expectedOutput'."
+else {
+    Invoke-BuildTarget -BuildTarget $Target | Out-Null
 }

@@ -445,20 +445,22 @@ static BoolInt FindSignature(CSzFile *stream, UInt64 *resPos)
 {
   Byte buf[kBufSize];
   size_t numPrevBytes = 0;
+  BoolInt signatureFound = False;
+  UInt64 signaturePos = 0;
   *resPos = 0;
   
   for (;;)
   {
     size_t processed, pos;
     if (*resPos > kSignatureSearchLimit)
-      return False;
+      break;
     processed = kBufSize - numPrevBytes;
     if (File_Read(stream, buf + numPrevBytes, &processed) != 0)
-      return False;
+      break;
     processed += numPrevBytes;
     if (processed < k7zStartHeaderSize ||
         (processed == k7zStartHeaderSize && numPrevBytes != 0))
-      return False;
+      break;
     processed -= k7zStartHeaderSize;
     for (pos = 0; pos <= processed; pos++)
     {
@@ -468,14 +470,21 @@ static BoolInt FindSignature(CSzFile *stream, UInt64 *resPos)
       if (memcmp(buf + pos, k7zSignature, k7zSignatureSize) == 0)
         if (CrcCalc(buf + pos + 12, 20) == GetUi32(buf + pos + 8))
         {
-          *resPos += pos;
-          return True;
+          signatureFound = True;
+          signaturePos = *resPos + pos;
         }
     }
     *resPos += processed;
     numPrevBytes = k7zStartHeaderSize;
     memmove(buf, buf + processed, k7zStartHeaderSize);
   }
+
+  if (signatureFound)
+  {
+    *resPos = signaturePos;
+    return True;
+  }
+  return False;
 }
 
 static void HexToString(UInt32 val, WCHAR *s)

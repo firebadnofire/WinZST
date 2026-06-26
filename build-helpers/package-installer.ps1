@@ -69,7 +69,7 @@ foreach ($file in $optionalFiles) {
 Write-Host "Installer stage contents:"
 Get-ChildItem -LiteralPath $stageRoot | Select-Object Name, Length | Format-Table -AutoSize
 
-& $cliExe a -t7z $payloadArchive (Join-Path $stageRoot '*')
+& $cliExe a -t7z -m0=lzma -mf=off $payloadArchive (Join-Path $stageRoot '*')
 if ($LASTEXITCODE -ne 0) {
     throw "Creating installer payload archive failed with exit code $LASTEXITCODE."
 }
