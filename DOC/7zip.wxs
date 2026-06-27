@@ -38,7 +38,7 @@
 <?endif ?>
 
 
-<?define ShellExtId = "{23170F69-40C1-278A-1000-000100020000}" ?>
+<?define ShellExtId = "{4CEDB584-4FC3-4CC6-9B21-C9679BB4693C}" ?>
 
 <?define BaseId = "23170F69-40C1-270$(var.CpuId)" ?>
 <?define BaseIdVer = "$(var.BaseId)-$(var.MmHex)-$(var.VerBuild)00" ?>
@@ -71,7 +71,7 @@
 <?define CompInstallRegFolder     = "$(var.CompId)88" ?>
 
 
-<?define Manufacturer = "Igor Pavlov" ?>
+<?define Manufacturer = "FireBADnoFire" ?>
 <?define HomePage = "http://www.7-zip.org/" ?>
 <?define AboutURL = "$(var.HomePage)" ?>
 <?define UpdatesURL = "$(var.HomePage)download.html" ?>
@@ -139,31 +139,31 @@
 
           <Component Id="InstallRegWild" Guid="$(var.CompInstallRegWild)" DiskId="1" Win64="$(var.Is64)">
             <Registry Id="MyInstallRegWild" Action="write" Type="string"
-               Root="HKCR" Key="*\shellex\ContextMenuHandlers\7-Zip"
+               Root="HKCR" Key="*\shellex\ContextMenuHandlers\WinZST"
                Value="$(var.ShellExtId)" />
           </Component>
 
           <Component Id="InstallRegDirectory" Guid="$(var.CompInstallRegDirectory)" DiskId="1" Win64="$(var.Is64)">
             <Registry Id="MyInstallRegDirectory" Action="write" Type="string"
-               Root="HKCR" Key="Directory\shellex\ContextMenuHandlers\7-Zip"
+               Root="HKCR" Key="Directory\shellex\ContextMenuHandlers\WinZST"
                Value="$(var.ShellExtId)" />
           </Component>
 
           <Component Id="InstallRegFolder" Guid="$(var.CompInstallRegFolder)" DiskId="1" Win64="$(var.Is64)">
             <Registry Id="MyInstallRegFolder" Action="write" Type="string"
-               Root="HKCR" Key="Folder\shellex\ContextMenuHandlers\7-Zip"
+               Root="HKCR" Key="Folder\shellex\ContextMenuHandlers\WinZST"
                Value="$(var.ShellExtId)" />
           </Component>
 
           <Component Id="InstallRegDirDD" Guid="$(var.CompInstallRegDirDD)" DiskId="1" Win64="$(var.Is64)">
             <Registry Id="MyInstallRegDirDD" Action="write" Type="string"
-               Root="HKCR" Key="Directory\shellex\DragDropHandlers\7-Zip"
+               Root="HKCR" Key="Directory\shellex\DragDropHandlers\WinZST"
                Value="$(var.ShellExtId)" />
           </Component>
 
           <Component Id="InstallRegDriveDD" Guid="$(var.CompInstallRegDriveDD)" DiskId="1" Win64="$(var.Is64)">
             <Registry Id="MyInstallRegDriveDD" Action="write" Type="string"
-               Root="HKCR" Key="Drive\shellex\DragDropHandlers\7-Zip"
+               Root="HKCR" Key="Drive\shellex\DragDropHandlers\WinZST"
                Value="$(var.ShellExtId)" />
           </Component>
 
@@ -171,7 +171,7 @@
             <Condition>Privileged</Condition>
             <Registry Id="MyInstallRegApproved" Action="write" Type="string"
                Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Approved"
-               Name="$(var.ShellExtId)" Value="7-Zip Shell Extension" />
+               Name="$(var.ShellExtId)" Value="WinZST Shell Extension" />
           </Component>
 
 

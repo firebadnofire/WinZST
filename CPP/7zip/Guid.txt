@@ -232,7 +232,8 @@ Handler GUIDs:
   EE Tar
   EF GZip
 
-{23170F69-40C1-278A-1000-000100020000} ContextMenu.h::CZipContextMenu
+{4CEDB584-4FC3-4CC6-9B21-C9679BB4693C} WinZST ContextMenu.h::CZipContextMenu
+// {23170F69-40C1-278A-1000-000100020000} upstream 7-Zip ContextMenu.h::CZipContextMenu
 
 // {23170F69-40C1-278A-1000-000100030000} // CAgentArchiveHandler
 // {23170F69-40C1-278B- old codecs clsids

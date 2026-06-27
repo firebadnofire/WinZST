@@ -101,10 +101,13 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 #endif
 #endif
 
-#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
+#define k_7zip_CLSID L"{4CEDB584-4FC3-4CC6-9B21-C9679BB4693C}"
+#define k_7zip_Legacy_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";
+static LPCWSTR const k_Reg_CLSID_7zip_Legacy = L"CLSID\\" k_7zip_Legacy_CLSID;
+static LPCWSTR const k_Reg_CLSID_7zip_Legacy_Inproc = L"CLSID\\" k_7zip_Legacy_CLSID L"\\InprocServer32";
 
 
 #define g_AllUsers True
@@ -482,6 +485,17 @@ static BoolInt AreEqual_Path_PrefixName(const wchar_t *s, const wchar_t *prefix,
   return AreStringsEqual_NoCase(s + wcslen(prefix), name);
 }
 
+static void DeleteLegacyStaticShellRoot(LPCWSTR keyName)
+{
+  WCHAR fullKeyName[MAX_PATH + 100];
+
+  wcscpy(fullKeyName, k_UserClassesRoot);
+  wcscat(fullKeyName, keyName);
+
+  MyRegistry_DeleteKey(HKEY_CURRENT_USER, fullKeyName);
+  MyRegistry_DeleteKey(HKEY_LOCAL_MACHINE, fullKeyName);
+}
+
 static void DeleteCommandStoreKey(LPCWSTR name)
 {
   WCHAR keyPath[MAX_PATH + 160];
@@ -494,9 +508,11 @@ static void DeleteCommandStoreKey(LPCWSTR name)
     wcscpy(commandPath, keyPath);
     wcscat(commandPath, L"\\command");
     MyRegistry_DeleteKey(HKEY_CURRENT_USER, commandPath);
+    MyRegistry_DeleteKey(HKEY_LOCAL_MACHINE, commandPath);
   }
 
   MyRegistry_DeleteKey(HKEY_CURRENT_USER, keyPath);
+  MyRegistry_DeleteKey(HKEY_LOCAL_MACHINE, keyPath);
 }
 
 static void DeleteModernShellKeys(void)
@@ -505,6 +521,11 @@ static void DeleteModernShellKeys(void)
   for (i = 0; i < Z7_ARRAY_SIZE(k_ModernShell_Items); i++)
   {
     WCHAR keyPath[MAX_PATH + 100];
+    DeleteLegacyStaticShellRoot(k_ModernShell_Items[i]);
+
+    wcscpy(keyPath, k_ModernShell_Items[i]);
+    MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+
     wcscpy(keyPath, k_UserClassesRoot);
     wcscat(keyPath, k_ModernShell_Items[i]);
     MyRegistry_DeleteKey(HKEY_CURRENT_USER, keyPath);
@@ -514,82 +535,108 @@ static void DeleteModernShellKeys(void)
     DeleteCommandStoreKey(k_CommandStore_Items[i]);
 }
 
+static void DeleteShellExKeys(void)
+{
+  unsigned i;
+  for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
+  {
+    WCHAR destPath[MAX_PATH];
+    CpyAscii(destPath, k_ShellEx_Items[i]);
+    CatAscii(destPath, "\\WinZST");
+    MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, destPath);
+  }
+}
+
+static void DeleteApprovedValue(LPCWSTR clsid)
+{
+  HKEY destKey = 0;
+  const LONG res = MyRegistry_OpenKey_ReadWrite(HKEY_LOCAL_MACHINE, k_Shell_Approved, &destKey);
+  if (res == ERROR_SUCCESS)
+  {
+    RegDeleteValueW(destKey, clsid);
+    /* res = */ RegCloseKey(destKey);
+  }
+}
+
+static void DeleteCLSIDIfOwned(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR clsid, LPCWSTR dllName)
+{
+  WCHAR s[MAX_PATH + 30];
+
+  if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, inprocKey, NULL, s))
+  {
+    if (AreEqual_Path_PrefixName(s, path, dllName))
+    {
+      const LONG res = MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, inprocKey);
+      if (res == ERROR_SUCCESS)
+        MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, clsidKey);
+      DeleteApprovedValue(clsid);
+    }
+  }
+}
+
+#ifdef USE_7ZIP_32_DLL
+
+static void DeleteShellExKeys_32(void)
+{
+  unsigned i;
+  for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
+  {
+    WCHAR destPath[MAX_PATH];
+    CpyAscii(destPath, k_ShellEx_Items[i]);
+    CatAscii(destPath, "\\WinZST");
+    MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, destPath);
+  }
+}
+
+static void DeleteApprovedValue_32(LPCWSTR clsid)
+{
+  HKEY destKey = 0;
+  const LONG res = MyRegistry_OpenKey_ReadWrite_32(HKEY_LOCAL_MACHINE, k_Shell_Approved, &destKey);
+  if (res == ERROR_SUCCESS)
+  {
+    RegDeleteValueW(destKey, clsid);
+    /* res = */ RegCloseKey(destKey);
+  }
+}
+
+static void DeleteCLSIDIfOwned_32(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR clsid, LPCWSTR dllName)
+{
+  WCHAR s[MAX_PATH + 30];
+
+  if (MyRegistry_QueryString2_32(HKEY_CLASSES_ROOT, inprocKey, NULL, s))
+  {
+    if (AreEqual_Path_PrefixName(s, path, dllName))
+    {
+      const LONG res = MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, inprocKey);
+      if (res == ERROR_SUCCESS)
+        MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, clsidKey);
+      DeleteApprovedValue_32(clsid);
+    }
+  }
+}
+
+#endif
+
 static void WriteCLSID(void)
 {
   WCHAR s[MAX_PATH + 30];
 
   DeleteModernShellKeys();
-  
-  if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip_Inproc, NULL, s))
-  {
-    if (AreEqual_Path_PrefixName(s, path, L"7-zip.dll"))
-    {
-      {
-        const LONG res = MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip_Inproc);
-        if (res == ERROR_SUCCESS)
-          MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip);
-      }
+  DeleteShellExKeys();
 
-      {
-        unsigned i;
-        for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
-        {
-          WCHAR destPath[MAX_PATH];
-          CpyAscii(destPath, k_ShellEx_Items[i]);
-          CatAscii(destPath, "\\WinZST");
-          
-          MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, destPath);
-        }
-      }
+  DeleteCLSIDIfOwned(k_Reg_CLSID_7zip_Inproc, k_Reg_CLSID_7zip,
+      k_7zip_CLSID, L"7-zip.dll");
+  DeleteCLSIDIfOwned(k_Reg_CLSID_7zip_Legacy_Inproc, k_Reg_CLSID_7zip_Legacy,
+      k_7zip_Legacy_CLSID, L"7-zip.dll");
 
-      {
-        HKEY destKey = 0;
-        const LONG res = MyRegistry_OpenKey_ReadWrite(HKEY_LOCAL_MACHINE, k_Shell_Approved, &destKey);
-        if (res == ERROR_SUCCESS)
-        {
-          RegDeleteValueW(destKey, k_7zip_CLSID);
-          /* res = */ RegCloseKey(destKey);
-        }
-      }
-    }
-  }
 
-  
   #ifdef USE_7ZIP_32_DLL
-  
-  if (MyRegistry_QueryString2_32(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip_Inproc, NULL, s))
-  {
-    if (AreEqual_Path_PrefixName(s, path, L"7-zip32.dll"))
-    {
-      {
-        const LONG res = MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip_Inproc);
-        if (res == ERROR_SUCCESS)
-          MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, k_Reg_CLSID_7zip);
-      }
 
-      {
-        unsigned i;
-        for (i = 0; i < Z7_ARRAY_SIZE(k_ShellEx_Items); i++)
-        {
-          WCHAR destPath[MAX_PATH];
-          CpyAscii(destPath, k_ShellEx_Items[i]);
-          CatAscii(destPath, "\\WinZST");
-          
-          MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, destPath);
-        }
-      }
-
-      {
-        HKEY destKey = 0;
-        const LONG res = MyRegistry_OpenKey_ReadWrite_32(HKEY_LOCAL_MACHINE, k_Shell_Approved, &destKey);
-        if (res == ERROR_SUCCESS)
-        {
-          RegDeleteValueW(destKey, k_7zip_CLSID);
-          /* res = */ RegCloseKey(destKey);
-        }
-      }
-    }
-  }
+  DeleteShellExKeys_32();
+  DeleteCLSIDIfOwned_32(k_Reg_CLSID_7zip_Inproc, k_Reg_CLSID_7zip,
+      k_7zip_CLSID, L"7-zip32.dll");
+  DeleteCLSIDIfOwned_32(k_Reg_CLSID_7zip_Legacy_Inproc, k_Reg_CLSID_7zip_Legacy,
+      k_7zip_Legacy_CLSID, L"7-zip32.dll");
   
   #endif
 
