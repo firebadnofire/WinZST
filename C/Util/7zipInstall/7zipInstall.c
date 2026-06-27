@@ -118,7 +118,7 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 #endif
 #endif
 
-#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-0001000A0000}"
+#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";
@@ -392,6 +392,39 @@ static LONG MyRegistry_CreateKey(HKEY parentKey, LPCWSTR name, HKEY *destKey)
       REG_OPTION_NON_VOLATILE,
       KEY_ALL_ACCESS | k_Reg_WOW_Flag,
       NULL, destKey, NULL);
+}
+
+static LONG MyRegistry_OpenKey_ReadWrite(HKEY parentKey, LPCWSTR name, HKEY *destKey)
+{
+  return RegOpenKeyExW(parentKey, name, 0, KEY_READ | KEY_WRITE | k_Reg_WOW_Flag, destKey);
+}
+
+static LONG MyRegistry_DeleteKey(HKEY parentKey, LPCWSTR name)
+{
+#if k_Reg_WOW_Flag != 0
+  return RegDeleteKeyExW(parentKey, name, k_Reg_WOW_Flag, 0);
+#else
+  return RegDeleteKeyW(parentKey, name);
+#endif
+}
+
+static void MyRegistry_DeleteTree(HKEY parentKey, LPCWSTR name)
+{
+  HKEY key = 0;
+  if (MyRegistry_OpenKey_ReadWrite(parentKey, name, &key) == ERROR_SUCCESS)
+  {
+    for (;;)
+    {
+      WCHAR childName[256];
+      DWORD childNameLen = Z7_ARRAY_SIZE(childName);
+      const LONG res = RegEnumKeyExW(key, 0, childName, &childNameLen, NULL, NULL, NULL, NULL);
+      if (res != ERROR_SUCCESS)
+        break;
+      MyRegistry_DeleteTree(key, childName);
+    }
+    RegCloseKey(key);
+  }
+  MyRegistry_DeleteKey(parentKey, name);
 }
 
 static LONG MyRegistry_CreateKeyAndVal(HKEY parentKey, LPCWSTR keyName, LPCWSTR valName, LPCWSTR val)
@@ -864,19 +897,13 @@ static LPCWSTR const k_Reg_SubCommands = L"SubCommands";
 static LPCWSTR const k_Reg_MultiSelectModel = L"MultiSelectModel";
 static LPCWSTR const k_Reg_ExplorerCommandHandler = L"ExplorerCommandHandler";
 static LPCWSTR const k_Reg_CommandStateSync = L"CommandStateSync";
-static LPCWSTR const k_CommandStoreShell = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CommandStore\\shell\\";
-static LPCWSTR const k_UserClassesRoot = L"Software\\Classes\\";
-static LPCWSTR const k_FileSubCommands =
-    L"WinZST.Open;"
-    L"WinZST.ExtractHere;"
-    L"WinZST.ExtractTo;"
-    L"WinZST.CompressTzs;"
-    L"WinZST.CompressZip;"
-    L"WinZST.Compress7z";
-static LPCWSTR const k_FolderSubCommands =
-    L"WinZST.CompressTzs;"
-    L"WinZST.CompressZip;"
-    L"WinZST.Compress7z";
+static LPCWSTR const k_ClassesRoot = L"Software\\Classes\\";
+static WCHAR g_ShellExtPath[MAX_PATH + 40];
+
+static void SetShellExtPath(LPCWSTR newPath)
+{
+  wcscpy(g_ShellExtPath, newPath);
+}
 
 static void WriteCLSID(void)
 {
@@ -911,8 +938,13 @@ static void WriteCLSID(void)
   if (res == ERROR_SUCCESS)
   {
     WCHAR destPath[MAX_PATH + 40];
-    wcscpy(destPath, path);
-    CatAscii(destPath, "7-zip.dll");
+    if (g_ShellExtPath[0] != 0)
+      wcscpy(destPath, g_ShellExtPath);
+    else
+    {
+      wcscpy(destPath, path);
+      CatAscii(destPath, "7-zip.dll");
+    }
     /* res = */ MyRegistry_SetString(destKey, NULL, destPath);
     /* res = */ MyRegistry_SetString(destKey, L"ThreadingModel", L"Apartment");
     // DeleteRegValue(destKey, L"InprocServer32");
@@ -937,74 +969,44 @@ static LPCSTR const k_ModernShell_Items[] =
   , "Drive\\shell\\WinZST"
 };
 
-static void Build_ContextMenu_Helper_Path(WCHAR *destPath)
-{
-  wcscpy(destPath, path);
-  CatAscii(destPath, "winzst-context-menu.cmd");
-}
-
 static void Build_FM_Path(WCHAR *destPath)
 {
   wcscpy(destPath, path);
   CatAscii(destPath, "WinZSTFM.exe");
 }
 
-static void Build_Command_String(WCHAR *destPath, const wchar_t *action)
-{
-  destPath[0] = L'\"';
-  Build_ContextMenu_Helper_Path(destPath + 1);
-  wcscat(destPath, L"\" ");
-  wcscat(destPath, action);
-  wcscat(destPath, L" \"%1\"");
-}
-
-static void WriteSubCommand(LPCWSTR verb, LPCWSTR title, LPCWSTR action, LPCWSTR iconPath)
-{
-  WCHAR keyPath[MAX_PATH * 2];
-  WCHAR commandPath[MAX_PATH * 2];
-  WCHAR command[MAX_PATH * 2];
-  HKEY destKey = 0;
-
-  wcscpy(keyPath, k_CommandStoreShell);
-  wcscat(keyPath, verb);
-
-  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, keyPath, &destKey) != ERROR_SUCCESS)
-    return;
-
-  MyRegistry_SetString(destKey, k_Reg_MUIVerb, title);
-  MyRegistry_SetString(destKey, k_Reg_Icon, iconPath);
-  RegCloseKey(destKey);
-
-  wcscpy(commandPath, keyPath);
-  wcscat(commandPath, L"\\command");
-
-  destKey = 0;
-  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, commandPath, &destKey) != ERROR_SUCCESS)
-    return;
-
-  Build_Command_String(command, action);
-  MyRegistry_SetString(destKey, NULL, command);
-  RegCloseKey(destKey);
-}
-
-static void WriteStaticShellRoot(LPCSTR keyNameA, LPCWSTR iconPath, LPCWSTR subCommands)
+static void DeleteLegacyStaticShellRoot(LPCSTR keyNameA)
 {
   WCHAR keyName[MAX_PATH + 80];
   WCHAR fullKeyName[MAX_PATH + 100];
-  HKEY destKey = 0;
 
   CpyAscii(keyName, keyNameA);
-  wcscpy(fullKeyName, k_UserClassesRoot);
+  wcscpy(fullKeyName, k_ClassesRoot);
   wcscat(fullKeyName, keyName);
-  if (MyRegistry_CreateKey(HKEY_CURRENT_USER, fullKeyName, &destKey) != ERROR_SUCCESS)
+
+  MyRegistry_DeleteTree(HKEY_CURRENT_USER, fullKeyName);
+  MyRegistry_DeleteTree(HKEY_LOCAL_MACHINE, fullKeyName);
+}
+
+static void WriteExplorerCommandShellRoot(LPCSTR keyNameA, LPCWSTR iconPath)
+{
+  WCHAR keyName[MAX_PATH + 80];
+  HKEY destKey = 0;
+
+  DeleteLegacyStaticShellRoot(keyNameA);
+
+  CpyAscii(keyName, keyNameA);
+  MyRegistry_DeleteTree(HKEY_CLASSES_ROOT, keyName);
+  if (MyRegistry_CreateKey(HKEY_CLASSES_ROOT, keyName, &destKey) != ERROR_SUCCESS)
     return;
 
   MyRegistry_SetString(destKey, k_Reg_MUIVerb, L"WinZST");
   MyRegistry_SetString(destKey, k_Reg_Icon, iconPath);
-  MyRegistry_SetString(destKey, k_Reg_SubCommands, subCommands);
   MyRegistry_SetString(destKey, k_Reg_MultiSelectModel, L"Player");
-  RegDeleteValueW(destKey, k_Reg_ExplorerCommandHandler);
-  RegDeleteValueW(destKey, k_Reg_CommandStateSync);
+  MyRegistry_SetString(destKey, k_Reg_ExplorerCommandHandler, k_7zip_CLSID);
+  MyRegistry_SetString(destKey, k_Reg_CommandStateSync, L"");
+  RegDeleteValueW(destKey, k_Reg_SubCommands);
+  RegDeleteValueW(destKey, L"ExtendedSubCommandsKey");
   RegCloseKey(destKey);
 }
 
@@ -1032,17 +1034,9 @@ static void WriteShellEx(void)
 
   Build_FM_Path(iconPath);
 
-  WriteSubCommand(L"WinZST.Open", L"Open archive", L"open", iconPath);
-  WriteSubCommand(L"WinZST.ExtractHere", L"Extract here", L"extract-here", iconPath);
-  WriteSubCommand(L"WinZST.ExtractTo", L"Extract to folder", L"extract-to", iconPath);
-  WriteSubCommand(L"WinZST.CompressTzs", L"Compress to .tzs", L"compress-tzs", iconPath);
-  WriteSubCommand(L"WinZST.CompressZip", L"Compress to .zip", L"compress-zip", iconPath);
-  WriteSubCommand(L"WinZST.Compress7z", L"Compress to .7z", L"compress-7z", iconPath);
-
   for (i = 0; i < Z7_ARRAY_SIZE(k_ModernShell_Items); i++)
   {
-    const LPCWSTR subCommands = (i == 0) ? k_FileSubCommands : k_FolderSubCommands;
-    WriteStaticShellRoot(k_ModernShell_Items[i], iconPath, subCommands);
+    WriteExplorerCommandShellRoot(k_ModernShell_Items[i], iconPath);
   }
 
   wcscpy(destPath, iconPath);
@@ -1458,6 +1452,7 @@ if (res == SZ_OK)
     res = SZ_ERROR_FAIL;
 
   pathLen = wcslen(path);
+  g_ShellExtPath[0] = 0;
 
   if (res == SZ_OK)
   {
@@ -1707,6 +1702,8 @@ if (res == SZ_OK)
         {
           // is it supported at win2000 ?
           #ifndef UNDER_CE
+          if (FindSubString(temp, "7-zip.dll"))
+            SetShellExtPath(origPath);
           if (!MoveFileExW(path, origPath, MOVEFILE_DELAY_UNTIL_REBOOT | MOVEFILE_REPLACE_EXISTING))
           {
             winRes = GetLastError();
@@ -1715,6 +1712,8 @@ if (res == SZ_OK)
           needRebootLevel |= fileLevel;
           #endif
         }
+        else if (FindSubString(temp, "7-zip.dll"))
+          SetShellExtPath(origPath);
 
       }
     }

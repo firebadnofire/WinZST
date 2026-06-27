@@ -101,7 +101,7 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 #endif
 #endif
 
-#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-0001000A0000}"
+#define k_7zip_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";

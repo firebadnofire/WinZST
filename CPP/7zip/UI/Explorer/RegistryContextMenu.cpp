@@ -17,7 +17,7 @@ using namespace NRegistry;
 // CLISID (and Approved ?) items are separated for 32-bit and 64-bit code.
 // shellex items shared by 32-bit and 64-bit code?
 
-#define k_Clsid_A "{23170F69-40C1-278A-1000-0001000A0000}"
+#define k_Clsid_A "{23170F69-40C1-278A-1000-000100020000}"
 
 static LPCTSTR const k_Clsid = TEXT(k_Clsid_A);
 static LPCTSTR const k_ShellExtName = TEXT("WinZST Shell Extension");

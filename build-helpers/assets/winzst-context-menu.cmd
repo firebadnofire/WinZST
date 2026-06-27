@@ -31,6 +31,11 @@ if /I "%ACTION%"=="extract-to" (
   exit /b 0
 )
 
+if /I "%ACTION%"=="test" (
+  start "" /D "%TARGET_DIR%" "%GUI%" t "%TARGET%"
+  exit /b 0
+)
+
 if /I "%ACTION%"=="compress-tzs" (
   start "" /D "%TARGET_DIR%" "%GUI%" a "%TARGET_NAME%.tzs" "%TARGET%"
   exit /b 0

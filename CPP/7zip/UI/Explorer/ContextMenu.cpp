@@ -532,35 +532,6 @@ static void MyFormatNew_ReducedName(UString &s, const UString &name)
   s = MyFormatNew(s, GetQuotedReducedString(name));
 }
 
-static const char * const kExtractExcludeExtensions =
-  " 3gp"
-  " aac ans ape asc asm asp aspx avi awk"
-  " bas bat bmp"
-  " c cs cls clw cmd cpp csproj css ctl cxx"
-  " def dep dlg dsp dsw"
-  " eps"
-  " f f77 f90 f95 fla flac frm"
-  " gif"
-  " h hpp hta htm html hxx"
-  " ico idl inc ini inl"
-  " java jpeg jpg js"
-  " la lnk log"
-  " mak manifest wmv mov mp3 mp4 mpe mpeg mpg m4a"
-  " ofr ogg"
-  " pac pas pdf php php3 php4 php5 phptml pl pm png ps py pyo"
-  " ra rb rc reg rka rm rtf"
-  " sed sh shn shtml sln sql srt swa"
-  " tcl tex tiff tta txt"
-  " vb vcproj vbs"
-  " mkv wav webm wma wv"
-  " xml xsd xsl xslt"
-  " ";
-
-/*
-static const char * const kNoOpenAsExtensions =
-  " 7z arj bz2 cab chm cpio flv gz lha lzh lzma rar swm tar tbz2 tgz wim xar xz z zip ";
-*/
-
 static const char * const kOpenTypes[] =
 {
     ""
@@ -574,6 +545,11 @@ static const char * const kOpenTypes[] =
   , "rar"
 };
 
+static const char * const kOpenArchiveExtensions =
+  " 7z apfs ar arj cab chm cpio deb dmg elf ext fat flv gpt gz"
+  " hfs ihex iso lha lzh lzma mbr mslz mub nsis ntfs pe ppmd"
+  " qcow qcow2 rar rpm squashfs swm tar udf uefi vdi vhd vhdx"
+  " xar xz z zip zst zstd bz2 tzs tzst tzstd ";
 
 bool FindExt(const char *p, const UString &name, CStringFinder &finder);
 bool FindExt(const char *p, const UString &name, CStringFinder &finder)
@@ -585,11 +561,41 @@ bool FindExt(const char *p, const UString &name, CStringFinder &finder)
   return finder.FindWord_In_LowCaseAsciiList_NoCase(p, name.Ptr(dotPos + 1));
 }
 
-/* returns false, if extraction of that file extension is not expected */
+
+static bool IsArchiveName(const UString &name)
+{
+  UString temp = name;
+  if (RemoveTarballSuffix(temp))
+    return true;
+
+  CStringFinder finder;
+  if (FindExt(kOpenArchiveExtensions, name, finder))
+    return true;
+
+  const int dotPos = name.ReverseFind_Dot();
+  if (dotPos <= 0)
+    return false;
+
+  const UString ext = name.Ptr(dotPos + 1);
+  temp = name.Left(dotPos);
+  temp.TrimRight();
+
+  const int dotPos2 = temp.ReverseFind_Dot();
+  if (dotPos2 <= 0)
+    return false;
+
+  const UString ext2 = temp.Ptr(dotPos2 + 1);
+  return (ext.IsEqualTo_Ascii_NoCase("001") && IsItArcExt(ext2))
+      || (ext.IsEqualTo_Ascii_NoCase("rar") &&
+          (  ext2.IsEqualTo_Ascii_NoCase("part001")
+          || ext2.IsEqualTo_Ascii_NoCase("part01")
+          || ext2.IsEqualTo_Ascii_NoCase("part1")));
+}
+
 static bool DoNeedExtract(const UString &name, CStringFinder &finder)
 {
-  // for (int y = 0; y < 1000; y++) FindExt(kExtractExcludeExtensions, name);
-  return !FindExt(kExtractExcludeExtensions, name, finder);
+  (void)finder;
+  return IsArchiveName(name);
 }
 
 // we must use diferent Verbs for Popup subMenu.
@@ -1000,39 +1006,6 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
       MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
     }
 
-    // CompressTo7z
-    if (contextMenuFlags & NContextMenuFlags::kCompressTo7z &&
-        !arcName_7z.IsEqualTo_NoCase(fs2us(fi0.Name)))
-    {
-      CCommandMapItem cmi;
-      UString s;
-      if (_dropMode)
-        cmi.Folder = _dropPath;
-      else
-        cmi.Folder = fs2us(folderPrefix);
-      cmi.ArcName = arcName_7z;
-      cmi.ArcType = "7z";
-      AddCommand(kCompressTo7z, s, cmi);
-      MyFormatNew_ReducedName(s, arcName_7z_Show);
-      Set_UserString_in_LastCommand(s);
-      MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
-    }
-
-    #ifdef EMAIL_SUPPORT
-    // CompressTo7zEmail
-    if ((contextMenuFlags & NContextMenuFlags::kCompressTo7zEmail) != 0  && !_dropMode)
-    {
-      CCommandMapItem cmi;
-      UString s;
-      cmi.ArcName = arcName_7z;
-      cmi.ArcType = "7z";
-      AddCommand(kCompressTo7zEmail, s, cmi);
-      MyFormatNew_ReducedName(s, arcName_7z_Show);
-      Set_UserString_in_LastCommand(s);
-      MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
-    }
-    #endif
-
     // CompressToZip
     if (contextMenuFlags & NContextMenuFlags::kCompressToZip &&
         !arcName_zip.IsEqualTo_NoCase(fs2us(fi0.Name)))
@@ -1061,6 +1034,39 @@ Z7_COMWF_B CZipContextMenu::QueryContextMenu(HMENU hMenu, UINT indexMenu,
       cmi.ArcType = "zip";
       AddCommand(kCompressToZipEmail, s, cmi);
       MyFormatNew_ReducedName(s, arcName_zip_Show);
+      Set_UserString_in_LastCommand(s);
+      MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
+    }
+    #endif
+
+    // CompressTo7z
+    if (contextMenuFlags & NContextMenuFlags::kCompressTo7z &&
+        !arcName_7z.IsEqualTo_NoCase(fs2us(fi0.Name)))
+    {
+      CCommandMapItem cmi;
+      UString s;
+      if (_dropMode)
+        cmi.Folder = _dropPath;
+      else
+        cmi.Folder = fs2us(folderPrefix);
+      cmi.ArcName = arcName_7z;
+      cmi.ArcType = "7z";
+      AddCommand(kCompressTo7z, s, cmi);
+      MyFormatNew_ReducedName(s, arcName_7z_Show);
+      Set_UserString_in_LastCommand(s);
+      MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
+    }
+
+    #ifdef EMAIL_SUPPORT
+    // CompressTo7zEmail
+    if ((contextMenuFlags & NContextMenuFlags::kCompressTo7zEmail) != 0  && !_dropMode)
+    {
+      CCommandMapItem cmi;
+      UString s;
+      cmi.ArcName = arcName_7z;
+      cmi.ArcType = "7z";
+      AddCommand(kCompressTo7zEmail, s, cmi);
+      MyFormatNew_ReducedName(s, arcName_7z_Show);
       Set_UserString_in_LastCommand(s);
       MyInsertMenu(popupMenu, subIndex++, currentCommandID++, s, bitmap);
     }
