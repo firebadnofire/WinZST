@@ -102,7 +102,7 @@ Write-Host "Portable stage contents:"
 Get-ChildItem -LiteralPath $stageRoot | Select-Object Name, Length | Format-Table -AutoSize
 
 Compress-Archive `
-    -LiteralPath (Join-Path $stageRoot '*') `
+    -Path (Join-Path $stageRoot '*') `
     -DestinationPath $releasePath `
     -CompressionLevel Optimal `
     -Force
