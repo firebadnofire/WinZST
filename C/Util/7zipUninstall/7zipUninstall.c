@@ -807,6 +807,45 @@ static void AddPathParam(wchar_t *dest, const wchar_t *src)
 }
 
 
+static void RemoveMatchingFiles(size_t pathLen, LPCWSTR mask, BoolInt *needReboot, WRes *winRes)
+{
+  WIN32_FIND_DATAW findData;
+  HANDLE h;
+
+  path[pathLen] = 0;
+  wcscat(path, mask);
+
+  h = FindFirstFileW(path, &findData);
+  if (h == INVALID_HANDLE_VALUE)
+  {
+    path[pathLen] = 0;
+    return;
+  }
+
+  do
+  {
+    if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+    {
+      path[pathLen] = 0;
+      wcscat(path, findData.cFileName);
+      if (findData.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+        SetFileAttributesW(path, 0);
+      if (!DeleteFileW(path))
+      {
+        if (!RemoveFileAfterReboot())
+          *winRes = GetLastError();
+        else
+          *needReboot = True;
+      }
+    }
+  }
+  while (FindNextFileW(h, &findData));
+
+  FindClose(h);
+  path[pathLen] = 0;
+}
+
+
 
 static BoolInt GetErrorMessage(DWORD errorCode, WCHAR *message)
 {
@@ -830,6 +869,14 @@ static BOOL RemoveDir(void)
   if (RemoveDirectoryW(path))
     return TRUE;
   return RemoveFileAfterReboot();
+}
+
+
+static void NotifyShellAssociationsChanged(void)
+{
+  #ifndef UNDER_CE
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+  #endif
 }
 
 
@@ -879,7 +926,7 @@ static int Install(void)
   SRes res = SZ_OK;
   WRes winRes = 0;
   
-  // BoolInt needReboot = False;
+  BoolInt needReboot = False;
   const size_t pathLen = wcslen(path);
 
   if (!g_SilentMode)
@@ -958,13 +1005,16 @@ static int Install(void)
           {
             winRes = GetLastError();
           }
-          /*
           else
             needReboot = True;
-          */
         }
       }
     }
+
+    RemoveMatchingFiles(pathLen, L"7-zip.dll.tmp*", &needReboot, &winRes);
+    #ifdef USE_7ZIP_32_DLL
+    RemoveMatchingFiles(pathLen, L"7-zip32.dll.tmp*", &needReboot, &winRes);
+    #endif
 
     CpyAscii(path + pathLen, k_Lang);
     RemoveDir();
@@ -980,6 +1030,7 @@ static int Install(void)
       SetRegKey_Path();
       WriteCLSID();
       SetShellProgramsGroup(g_HWND);
+      NotifyShellAssociationsChanged();
       if (!g_SilentMode)
         SetWindowTextW(g_InfoLine_HWND, k_7zip_with_Ver L" is uninstalled");
     }
@@ -990,7 +1041,13 @@ static int Install(void)
 
   if (res == SZ_OK)
   {
-    // if (!g_SilentMode && needReboot);
+    if (!g_SilentMode && needReboot)
+    {
+      MessageBoxW(g_HWND,
+          L"Windows still has WinZST shell files loaded.\n"
+          L"Restart Windows before relying on Explorer context menu changes.",
+          k_7zip_with_Ver_Uninstall, MB_ICONINFORMATION | MB_OK);
+    }
     return 0;
   }
 

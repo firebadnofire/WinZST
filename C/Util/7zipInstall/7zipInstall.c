@@ -60,6 +60,13 @@ static LPCSTR const k_7zip = "WinZST";
 
 static LPCWSTR const k_Reg_Software_7zip = L"Software\\WinZST";
 
+static void NotifyShellAssociationsChanged(void)
+{
+  #ifndef UNDER_CE
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+  #endif
+}
+
 // #define Z7_64BIT_INSTALLER 1
 
 #ifdef _WIN64
@@ -1730,6 +1737,7 @@ if (res == SZ_OK)
       SetRegKey_Path();
       WriteCLSID();
       WriteShellEx();
+      NotifyShellAssociationsChanged();
       
       SetShellProgramsGroup(g_HWND);
       if (!g_SilentMode)
