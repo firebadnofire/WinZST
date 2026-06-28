@@ -255,9 +255,9 @@ Z7_COMWF_B CZipContextMenu::Initialize(LPCITEMIDLIST pidlFolder, LPDATAOBJECT da
 /////////////////////////////
 // IContextMenu
 
-static LPCSTR const kMainVerb = "SevenZip";
-static LPCSTR const kOpenCascadedVerb = "SevenZip.OpenWithType.";
-static LPCSTR const kCheckSumCascadedVerb = "SevenZip.Checksum";
+static LPCSTR const kMainVerb = "WinZST";
+static LPCSTR const kOpenCascadedVerb = "WinZST.OpenWithType.";
+static LPCSTR const kCheckSumCascadedVerb = "WinZST.Checksum";
 
 
 struct CContextMenuCommand
