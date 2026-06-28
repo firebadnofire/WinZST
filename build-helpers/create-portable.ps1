@@ -83,7 +83,6 @@ foreach ($item in $portableTargets) {
 
 $optionalFiles = @(
     @{ Source = "DOC\License.txt"; Name = "License.txt" },
-    @{ Source = "DOC\src-history.txt"; Name = "History.txt" },
     @{ Source = "README.md"; Name = "README.md" }
 )
 
