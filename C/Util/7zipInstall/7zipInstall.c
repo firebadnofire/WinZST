@@ -982,6 +982,103 @@ static void Build_FM_Path(WCHAR *destPath)
   CatAscii(destPath, "WinZSTFM.exe");
 }
 
+typedef struct
+{
+  const char *Ext;
+  const char *ProgId;
+  LPCWSTR Title;
+} CFileAssocInfo;
+
+static const CFileAssocInfo k_FileAssociations[] =
+{
+    /* Windows associates by final suffix, so .tar.zst/.tar.gz/.tar.xz/.tar.bz2 are covered by .zst/.gz/.xz/.bz2. */
+    { "tzs",   "WinZST.tzs",   L"WinZST archive" }
+  , { "zst",   "WinZST.zst",   L"Zstandard archive" }
+  , { "tzst",  "WinZST.tzst",  L"WinZST archive" }
+  , { "tzstd", "WinZST.tzstd", L"WinZST archive" }
+  , { "gz",    "WinZST.gz",    L"gzip archive" }
+  , { "tgz",   "WinZST.tgz",   L"gzip tar archive" }
+  , { "xz",    "WinZST.xz",    L"XZ archive" }
+  , { "txz",   "WinZST.txz",   L"XZ tar archive" }
+  , { "bz2",   "WinZST.bz2",   L"bzip2 archive" }
+  , { "tbz2",  "WinZST.tbz2",  L"bzip2 tar archive" }
+  , { "tbz",   "WinZST.tbz",   L"bzip2 tar archive" }
+  , { "tar",   "WinZST.tar",   L"tar archive" }
+  , { "zip",   "WinZST.zip",   L"ZIP archive" }
+  , { "7z",    "WinZST.7z",    L"7-Zip archive" }
+};
+
+static void Build_FM_Command(WCHAR *destPath)
+{
+  destPath[0] = L'\"';
+  wcscpy(destPath + 1, path);
+  CatAscii(destPath, "WinZSTFM.exe\" \"%1\"");
+}
+
+static void Build_FM_IconPath(WCHAR *destPath)
+{
+  destPath[0] = L'\"';
+  wcscpy(destPath + 1, path);
+  CatAscii(destPath, "WinZSTFM.exe\",0");
+}
+
+static void Build_Assoc_ExtKey(WCHAR *destPath, const char *ext)
+{
+  destPath[0] = L'.';
+  CpyAscii(destPath + 1, ext);
+}
+
+static void Build_Assoc_ProgKey(WCHAR *destPath, const char *progId, const char *subKey)
+{
+  CpyAscii(destPath, progId);
+  if (subKey)
+    CatAscii(destPath, subKey);
+}
+
+static void WriteFileAssociation(const CFileAssocInfo *assoc, LPCWSTR command, LPCWSTR iconPath)
+{
+  WCHAR extKey[MAX_PATH + 40];
+  WCHAR progId[MAX_PATH + 40];
+  WCHAR keyPath[MAX_PATH + 160];
+  HKEY destKey = 0;
+
+  Build_Assoc_ExtKey(extKey, assoc->Ext);
+  CpyAscii(progId, assoc->ProgId);
+  MyRegistry_CreateKeyAndVal(HKEY_CLASSES_ROOT, extKey, NULL, progId);
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, NULL);
+  if (MyRegistry_CreateKey(HKEY_CLASSES_ROOT, keyPath, &destKey) == ERROR_SUCCESS)
+  {
+    MyRegistry_SetString(destKey, NULL, assoc->Title);
+    RegCloseKey(destKey);
+  }
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\DefaultIcon");
+  MyRegistry_CreateKeyAndVal(HKEY_CLASSES_ROOT, keyPath, NULL, iconPath);
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell");
+  MyRegistry_CreateKeyAndVal(HKEY_CLASSES_ROOT, keyPath, NULL, L"");
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell\\open");
+  MyRegistry_CreateKeyAndVal(HKEY_CLASSES_ROOT, keyPath, NULL, L"");
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell\\open\\command");
+  MyRegistry_CreateKeyAndVal(HKEY_CLASSES_ROOT, keyPath, NULL, command);
+}
+
+static void WriteFileAssociations(void)
+{
+  unsigned i;
+  WCHAR command[MAX_PATH * 2 + 80];
+  WCHAR iconPath[MAX_PATH * 2 + 80];
+
+  Build_FM_Command(command);
+  Build_FM_IconPath(iconPath);
+
+  for (i = 0; i < Z7_ARRAY_SIZE(k_FileAssociations); i++)
+    WriteFileAssociation(k_FileAssociations + i, command, iconPath);
+}
+
 static void DeleteLegacyStaticShellRoot(LPCSTR keyNameA)
 {
   WCHAR keyName[MAX_PATH + 80];
@@ -1059,6 +1156,8 @@ static void WriteShellEx(void)
     }
 
   }
+
+  WriteFileAssociations();
   
   {
     HKEY destKey = 0;

@@ -471,6 +471,31 @@ static LPCWSTR const k_AppRegistration_7zFm = L"Software\\Classes\\Applications\
 #define k_REG_Uninstall L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
 static LPCWSTR const k_Uninstall_7zip = k_REG_Uninstall L"WinZST";
 
+typedef struct
+{
+  const char *Ext;
+  const char *ProgId;
+} CFileAssocInfo;
+
+static const CFileAssocInfo k_FileAssociations[] =
+{
+    /* Windows associates by final suffix, so .tar.zst/.tar.gz/.tar.xz/.tar.bz2 are covered by .zst/.gz/.xz/.bz2. */
+    { "tzs",   "WinZST.tzs" }
+  , { "zst",   "WinZST.zst" }
+  , { "tzst",  "WinZST.tzst" }
+  , { "tzstd", "WinZST.tzstd" }
+  , { "gz",    "WinZST.gz" }
+  , { "tgz",   "WinZST.tgz" }
+  , { "xz",    "WinZST.xz" }
+  , { "txz",   "WinZST.txz" }
+  , { "bz2",   "WinZST.bz2" }
+  , { "tbz2",  "WinZST.tbz2" }
+  , { "tbz",   "WinZST.tbz" }
+  , { "tar",   "WinZST.tar" }
+  , { "zip",   "WinZST.zip" }
+  , { "7z",    "WinZST.7z" }
+};
+
 
 static void RemoveQuotes(wchar_t *s)
 {
@@ -563,6 +588,76 @@ static void DeleteApplicationRegistration(void)
 {
   DeleteApplicationRegistration2(HKEY_CURRENT_USER);
   DeleteApplicationRegistration2(HKEY_LOCAL_MACHINE);
+}
+
+static void Build_FM_Command(WCHAR *destPath)
+{
+  destPath[0] = L'\"';
+  wcscpy(destPath + 1, path);
+  CatAscii(destPath, "WinZSTFM.exe\" \"%1\"");
+}
+
+static void Build_Assoc_ExtKey(WCHAR *destPath, const char *ext)
+{
+  destPath[0] = L'.';
+  CpyAscii(destPath + 1, ext);
+}
+
+static void Build_Assoc_ProgKey(WCHAR *destPath, const char *progId, const char *subKey)
+{
+  CpyAscii(destPath, progId);
+  if (subKey)
+    CatAscii(destPath, subKey);
+}
+
+static void DeleteFileAssociation(const CFileAssocInfo *assoc, LPCWSTR command)
+{
+  WCHAR extKey[MAX_PATH + 40];
+  WCHAR progId[MAX_PATH + 40];
+  WCHAR keyPath[MAX_PATH + 160];
+  WCHAR value[MAX_PATH * 2 + 80];
+
+  Build_Assoc_ExtKey(extKey, assoc->Ext);
+  CpyAscii(progId, assoc->ProgId);
+
+  if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, extKey, NULL, value))
+    if (AreStringsEqual_NoCase(value, progId))
+    {
+      HKEY extRegKey = 0;
+      if (MyRegistry_OpenKey_ReadWrite(HKEY_CLASSES_ROOT, extKey, &extRegKey) == ERROR_SUCCESS)
+      {
+        RegDeleteValueW(extRegKey, NULL);
+        RegCloseKey(extRegKey);
+      }
+      MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, extKey);
+    }
+
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell\\open\\command");
+  if (!MyRegistry_QueryString2(HKEY_CLASSES_ROOT, keyPath, NULL, value))
+    return;
+  if (!AreStringsEqual_NoCase(value, command))
+    return;
+
+  MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell\\open");
+  MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\shell");
+  MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, "\\DefaultIcon");
+  MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+  Build_Assoc_ProgKey(keyPath, assoc->ProgId, NULL);
+  MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, keyPath);
+}
+
+static void DeleteFileAssociations(void)
+{
+  unsigned i;
+  WCHAR command[MAX_PATH * 2 + 80];
+
+  Build_FM_Command(command);
+
+  for (i = 0; i < Z7_ARRAY_SIZE(k_FileAssociations); i++)
+    DeleteFileAssociation(k_FileAssociations + i, command);
 }
 
 static void DeleteShellExKeys(void)
@@ -693,6 +788,7 @@ static void WriteCLSID(void)
   DeleteCLSIDIfInstallPath(k_Reg_CLSID_7zip_Legacy_Temp_Inproc,
       k_Reg_CLSID_7zip_Legacy_Temp, k_7zip_Legacy_Temp_CLSID);
   DeleteApplicationRegistration();
+  DeleteFileAssociations();
 
 
   #ifdef USE_7ZIP_32_DLL
