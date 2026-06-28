@@ -37,12 +37,12 @@ $portableTargets = @(
 )
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = "distrib\winzst-windows-$Arch-portable.zip"
+    $OutputPath = "dist\releases\winzst-windows-$Arch-portable.zip"
 }
 
 $releasePath = Join-Path $repoRoot $OutputPath
 $releaseDir = Split-Path -Parent $releasePath
-$stageRoot = Join-Path $repoRoot "distrib\portable-stage\$Arch"
+$stageRoot = Join-Path $repoRoot "dist\releases\portable-stage\$Arch"
 
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
