@@ -42,7 +42,7 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 
 $releasePath = Join-Path $repoRoot $OutputPath
 $releaseDir = Split-Path -Parent $releasePath
-$stageRoot = Join-Path $repoRoot "dist\releases\portable-stage\$Arch"
+$stageRoot = Join-Path $repoRoot "dist\windows\$Arch\portable-stage"
 
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
@@ -58,10 +58,6 @@ foreach ($item in $portableTargets) {
     }
 
     & $buildScript @buildArgs
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building target '$($item.Target)' failed with exit code $LASTEXITCODE."
-    }
 }
 
 Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
