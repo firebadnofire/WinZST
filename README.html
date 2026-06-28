@@ -1,0 +1,285 @@
+<h1 id="winzst">WinZST</h1>
+<p>WinZST is a Windows archive utility derived from 7-Zip. It focuses on
+making tar archives and compressed tar archives behave like normal
+Windows archives.</p>
+<p>The core idea is simple:</p>
+<pre class="text"><code>compressed tarball in -&gt; final contents out</code></pre>
+<p>When a user extracts <code>example.tgz</code>,
+<code>example.txz</code>, <code>example.tbz</code>,
+<code>example.tar.zst</code>, or <code>example.tzs</code>, the expected
+output is the archive contents, not an intermediate <code>.tar</code>
+file.</p>
+<p>WinZST is tarball-first, not Zstandard-only. Zstandard-compressed
+tarballs are the preferred default, but WinZST also supports other tar
+workflows such as gzip, bzip2, XZ/LZMA2, GNU tar, and POSIX tar, while
+keeping broad archive support inherited from 7-Zip.</p>
+<h2 id="why-winzst-exists">Why WinZST Exists</h2>
+<p>Compressed tarballs are common, portable, and useful, but Windows
+archive tools often expose their internal layering in awkward ways.</p>
+<p>A user who downloads this:</p>
+<pre class="text"><code>project.tar.gz</code></pre>
+<p>usually wants this:</p>
+<pre class="text"><code>project/</code></pre>
+<p>not this:</p>
+<pre class="text"><code>project.tar</code></pre>
+<p>WinZST exists to make tarballs worth downloading on Windows.</p>
+<h2 id="archive-formats">Archive Formats</h2>
+<p>WinZST keeps the inherited general archive utility model, but gives
+tar formats better first-class treatment.</p>
+<p>Primary creation formats include:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Format</th>
+<th>Typical extension</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WinZST archive</td>
+<td><code>.tzs</code></td>
+<td>Standard tar archive compressed with Zstandard</td>
+</tr>
+<tr>
+<td>Tarball with Zstandard</td>
+<td><code>.tar.zst</code></td>
+<td>Expanded form of <code>.tzs</code></td>
+</tr>
+<tr>
+<td>Tarball with gzip</td>
+<td><code>.tgz</code>, <code>.tar.gz</code></td>
+<td>Common Unix/Linux tarball format</td>
+</tr>
+<tr>
+<td>Tarball with bzip2</td>
+<td><code>.tbz</code>, <code>.tbz2</code>, <code>.tar.bz2</code></td>
+<td>Older but still common compressed tar format</td>
+</tr>
+<tr>
+<td>Tarball with XZ/LZMA2</td>
+<td><code>.txz</code>, <code>.tar.xz</code></td>
+<td>High-compression tarball format</td>
+</tr>
+<tr>
+<td>GNU tar</td>
+<td><code>.tar</code></td>
+<td>Plain tar archive using GNU tar behavior where supported</td>
+</tr>
+<tr>
+<td>POSIX tar</td>
+<td><code>.tar</code></td>
+<td>Plain tar archive using POSIX tar behavior where supported</td>
+</tr>
+<tr>
+<td>ZIP archive</td>
+<td><code>.zip</code></td>
+<td>Standard Windows-compatible archive format</td>
+</tr>
+<tr>
+<td>7-Zip archive</td>
+<td><code>.7z</code></td>
+<td>Inherited compatibility format</td>
+</tr>
+</tbody>
+</table>
+<p>Other inherited archive formats may remain supported where licensing,
+maintenance, and security allow.</p>
+<h2 id="the-.tzs-format">The <code>.tzs</code> Format</h2>
+<p><code>.tzs</code> is WinZST’s preferred archive extension.</p>
+<pre class="text"><code>.tzs == .tar.zst</code></pre>
+<p>A <code>.tzs</code> file is a standard tar archive compressed with
+Zstandard.</p>
+<p>It is not:</p>
+<ul>
+<li>a proprietary container</li>
+<li>a renamed <code>.7z</code> archive</li>
+<li>a renamed <code>.zip</code> archive</li>
+<li>a WinZST-only format</li>
+<li>encrypted by default</li>
+</ul>
+<p>A <code>.tzs</code> archive should remain compatible with standard
+tar plus Zstandard tooling. In practice, this means a user should be
+able to rename:</p>
+<pre class="text"><code>archive.tzs</code></pre>
+<p>to:</p>
+<pre class="text"><code>archive.tar.zst</code></pre>
+<p>and extract it with tools that understand tar and Zstandard.</p>
+<p>The purpose of <code>.tzs</code> is Windows usability: a short,
+recognizable extension for a standard tar plus Zstandard archive.</p>
+<h2 id="tarball-extraction-behavior">Tarball Extraction Behavior</h2>
+<p>WinZST should extract compressed tarballs directly to their final
+contents.</p>
+<p>For example, if this archive:</p>
+<pre class="text"><code>example.tgz</code></pre>
+<p>contains:</p>
+<pre class="text"><code>example/
+example/file.txt</code></pre>
+<p>then normal extraction should produce:</p>
+<pre class="text"><code>example/
+example/file.txt</code></pre>
+<p>It should not produce:</p>
+<pre class="text"><code>example.tar</code></pre>
+<p>This behavior applies to supported compressed tarball formats,
+including:</p>
+<pre class="text"><code>.tzs
+.tar.zst
+.tgz
+.tar.gz
+.tbz
+.tbz2
+.tar.bz2
+.txz
+.tar.xz</code></pre>
+<p>The tar layer is an implementation detail during normal
+extraction.</p>
+<h2 id="decompress-only-behavior">Decompress-Only Behavior</h2>
+<p>WinZST may support decompress-only behavior for advanced users.</p>
+<p>For example:</p>
+<pre class="text"><code>example.tgz -&gt; example.tar
+example.txz -&gt; example.tar
+example.tzs -&gt; example.tar</code></pre>
+<p>That is valid when the user explicitly asks for the raw tar
+stream.</p>
+<p>However, decompress-only is not the default behavior. Normal archive
+extraction should give the user the final files and folders.</p>
+<h2 id="project-status">Project Status</h2>
+<p>WinZST is an early fork of the 7-Zip source tree.</p>
+<p>The first target platform is:</p>
+<pre class="text"><code>Windows 11 x64</code></pre>
+<p>Early builds may be experimental and unsigned. Windows SmartScreen or
+similar trust prompts should be expected until release signing is
+established.</p>
+<p>The current <code>.tzs</code> implementation writes
+standard-compatible Zstandard output through the inherited archive
+pipeline. If the current encoder path uses stored/raw Zstandard blocks,
+that should be treated as a temporary compatibility implementation, not
+the final compression-ratio target. A full Zstandard encoder should
+replace it when the dependency and build integration are ready.</p>
+<h2 id="relationship-to-7-zip">Relationship to 7-Zip</h2>
+<p>WinZST is derived from 7-Zip.</p>
+<p>That inheritance is important. The existing 7-Zip codebase provides
+mature archive parsing, extraction, compression, Windows GUI
+infrastructure, shell integration, build rules, and broad format
+support.</p>
+<p>WinZST is not official 7-Zip and is not endorsed by upstream
+7-Zip.</p>
+<p>WinZST must preserve applicable upstream copyright notices, LGPL
+notices, third-party notices, and unRAR license restrictions.</p>
+<h2 id="rar-support">RAR Support</h2>
+<p>WinZST may keep inherited RAR extraction support where the source
+tree and licenses allow it.</p>
+<p>RAR support is extraction-only.</p>
+<p>WinZST does not create <code>.rar</code> archives and must not use
+unRAR-derived code to recreate the proprietary RAR compression
+algorithm.</p>
+<h2 id="building">Building</h2>
+<p>WinZST uses the inherited upstream 7-Zip NMAKE build system.</p>
+<p>The PowerShell helper scripts in <code>build-helpers/</code> wrap
+that build flow from the repository root. They do not replace the
+upstream build system.</p>
+<p>Requirements:</p>
+<ul>
+<li>Windows</li>
+<li>PowerShell</li>
+<li>Visual Studio 2022 Build Tools</li>
+<li>MSVC C++ toolchain</li>
+<li>Windows SDK</li>
+</ul>
+<p>Default build:</p>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\build-helpers\build<span class="op">.</span><span class="fu">ps1</span></span></code></pre></div>
+<p>Clean rebuild:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\build-helpers\build<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>CleanFirst</span></code></pre></div>
+<p>Build File Manager:</p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\build-helpers\build<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>Target Fm</span></code></pre></div>
+<p>Clean helper-supported targets:</p>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="op">.</span>\build-helpers\clean<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>Target All</span></code></pre></div>
+<p>If PowerShell blocks the helper scripts because they are unsigned,
+run them with an explicit temporary execution policy bypass:</p>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>powershell <span class="op">-</span>ExecutionPolicy Bypass <span class="op">-</span>File <span class="op">.</span>\build-helpers\build<span class="op">.</span><span class="fu">ps1</span></span></code></pre></div>
+<p>or:</p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>powershell <span class="op">-</span>ExecutionPolicy Bypass <span class="op">-</span>File <span class="op">.</span>\build-helpers\clean<span class="op">.</span><span class="fu">ps1</span> <span class="op">-</span>Target All</span></code></pre></div>
+<h2 id="testing-expectations">Testing Expectations</h2>
+<p>A build is not useful just because it compiles.</p>
+<p>At minimum, WinZST should be tested for:</p>
+<ul>
+<li>opening archives</li>
+<li>listing archive contents</li>
+<li>creating <code>.tzs</code></li>
+<li>creating <code>.tgz</code></li>
+<li>creating <code>.tbz</code></li>
+<li>creating <code>.txz</code></li>
+<li>creating plain <code>.tar</code></li>
+<li>extracting <code>.tzs</code> directly to contents</li>
+<li>extracting <code>.tar.zst</code> directly to contents</li>
+<li>extracting <code>.tgz</code> and <code>.tar.gz</code> directly to
+contents</li>
+<li>extracting <code>.tbz</code>, <code>.tbz2</code>, and
+<code>.tar.bz2</code> directly to contents</li>
+<li>extracting <code>.txz</code> and <code>.tar.xz</code> directly to
+contents</li>
+<li>keeping <code>.zip</code> extraction and creation working</li>
+<li>keeping <code>.7z</code> extraction and creation working</li>
+<li>testing archives without extraction</li>
+<li>preserving safe extraction behavior</li>
+</ul>
+<p>A WinZST build that creates <code>.tzs</code> but breaks ZIP or 7z is
+not good enough.</p>
+<p>A WinZST build that still extracts compressed tarballs to
+intermediate <code>.tar</code> files by default is not good enough.</p>
+<h2 id="security-notes">Security Notes</h2>
+<p>Archive extraction handles untrusted input and writes to the
+filesystem.</p>
+<p>WinZST must preserve safe extraction behavior and should prefer
+Windows-safe tar extraction over perfect Unix metadata restoration.</p>
+<p>Do not weaken checks for:</p>
+<ul>
+<li>path traversal</li>
+<li>absolute paths</li>
+<li>drive-qualified Windows paths</li>
+<li>UNC paths</li>
+<li>unsafe symlinks</li>
+<li>unsafe hardlinks</li>
+<li>alternate data streams</li>
+<li>unsafe overwrites</li>
+<li>password handling</li>
+<li>plugin loading</li>
+<li>archive parser behavior</li>
+</ul>
+<p>Tar metadata is not harmless. Symlinks, hardlinks, device files,
+owners, groups, permissions, and unusual paths all need careful handling
+on Windows.</p>
+<p>Safety beats compatibility.</p>
+<h2 id="non-goals">Non-Goals</h2>
+<p>WinZST is not trying to be:</p>
+<ul>
+<li>a new proprietary archive format</li>
+<li>a replacement compression algorithm</li>
+<li>a cloud storage product</li>
+<li>an Electron rewrite</li>
+<li>a Rust rewrite</li>
+<li>a cosmetic 7-Zip reskin</li>
+<li>a RAR creator</li>
+<li>a fork that hides its upstream origin</li>
+</ul>
+<p>The goal is narrower and more practical:</p>
+<pre class="text"><code>Make tarballs behave correctly on Windows.</code></pre>
+<h2 id="license">License</h2>
+<p>WinZST is derived from 7-Zip and retains the applicable upstream
+license structure.</p>
+<p>The source tree includes LGPL-covered code, third-party code under
+other compatible terms, and unRAR-derived code with additional
+restrictions.</p>
+<p>Do not remove license files or upstream notices.</p>
+<p>See the included license documents for details.</p>
