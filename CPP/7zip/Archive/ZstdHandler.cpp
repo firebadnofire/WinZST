@@ -32,7 +32,7 @@ using namespace NWindows;
 namespace NArchive {
 namespace NZstd {
 
-static const UInt32 kZstdDefaultLevel = 5;
+static const int kZstdDefaultLevel = 5;
 
 class CDecodedTempInStream;
 
@@ -156,7 +156,7 @@ class CHandler Z7_final:
   bool _tarPosixMode;
   // bool _smallMode;
 
-  UInt32 _level;
+  int _level;
   UInt64 _phySize;
   UInt64 _phySize_Decoded;
   UInt64 _unpackSize;
@@ -1108,14 +1108,28 @@ Z7_COM7F_IMF(CHandler::SetProperties(const wchar_t * const *names, const PROPVAR
         return E_INVALIDARG;
       continue;
     }
-    if (name.IsPrefixedBy_Ascii_NoCase("x"))
+    if (name.IsPrefixedBy_Ascii_NoCase("zx")
+        || name.IsPrefixedBy_Ascii_NoCase("x"))
     {
-      name.Delete(0, 1);
-      UInt32 level = kZstdDefaultLevel;
+      name.Delete(0, name[0] == 'z' || name[0] == 'Z' ? 2 : 1);
+      UInt32 level = (UInt32)kZstdDefaultLevel;
       RINOK(ParsePropToUInt32(name, value, level))
       if (level > (UInt32)ZSTD_maxCLevel())
         return E_INVALIDARG;
-      _level = level;
+      _level = (int)level;
+      continue;
+    }
+    if (name.IsPrefixedBy_Ascii_NoCase("zf")
+        || name.IsPrefixedBy_Ascii_NoCase("f"))
+    {
+      name.Delete(0, name[0] == 'z' || name[0] == 'Z' ? 2 : 1);
+      UInt32 level = 1;
+      RINOK(ParsePropToUInt32(name, value, level))
+      const int minLevel = ZSTD_minCLevel();
+      const UInt32 maxFastLevel = minLevel < 0 ? (UInt32)(-minLevel) : 0;
+      if (level == 0 || level > maxFastLevel)
+        return E_INVALIDARG;
+      _level = -(int)level;
       continue;
     }
     if (name.IsEqualTo_Ascii_NoCase("m"))
@@ -1160,11 +1174,11 @@ public:
       ZSTD_freeCCtx(_ctx);
   }
 
-  HRESULT Init(ISequentialOutStream *stream, UInt32 level);
+  HRESULT Init(ISequentialOutStream *stream, int level);
   HRESULT Finish();
 };
 
-HRESULT CZstdEncodeOutStream::Init(ISequentialOutStream *stream, UInt32 level)
+HRESULT CZstdEncodeOutStream::Init(ISequentialOutStream *stream, int level)
 {
   _stream = stream;
   _finished = false;

@@ -164,7 +164,7 @@ Windows 11 x64
 
 Early builds may be experimental and unsigned. Windows SmartScreen or similar trust prompts should be expected until release signing is established.
 
-The current `.tzs` implementation writes standard-compatible Zstandard output through the inherited archive pipeline. If the current encoder path uses stored/raw Zstandard blocks, that should be treated as a temporary compatibility implementation, not the final compression-ratio target. A full Zstandard encoder should replace it when the dependency and build integration are ready.
+The current `.tzs` and `.tar.zst` creation path writes a tar archive through the bundled libzstd streaming encoder. It is standard tar plus real Zstandard compression, not stored/raw placeholder blocks, a renamed `.7z`, a renamed `.zip`, or a WinZST-only wrapper. Re-run `tests/test-zstd-archive-creation.ps1` after compression changes to verify creation, listing, testing, extraction, hash matching, size ratios, and tar plus Zstandard compatibility.
 
 ## Relationship to 7-Zip
 
