@@ -103,11 +103,14 @@ static LPCWSTR const k_Reg_Path32 = L"Path"
 
 #define k_7zip_CLSID L"{4CEDB584-4FC3-4CC6-9B21-C9679BB4693C}"
 #define k_7zip_Legacy_CLSID L"{23170F69-40C1-278A-1000-000100020000}"
+#define k_7zip_Legacy_Temp_CLSID L"{23170F69-40C1-278A-1000-0001000A0000}"
 
 static LPCWSTR const k_Reg_CLSID_7zip = L"CLSID\\" k_7zip_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Inproc = L"CLSID\\" k_7zip_CLSID L"\\InprocServer32";
 static LPCWSTR const k_Reg_CLSID_7zip_Legacy = L"CLSID\\" k_7zip_Legacy_CLSID;
 static LPCWSTR const k_Reg_CLSID_7zip_Legacy_Inproc = L"CLSID\\" k_7zip_Legacy_CLSID L"\\InprocServer32";
+static LPCWSTR const k_Reg_CLSID_7zip_Legacy_Temp = L"CLSID\\" k_7zip_Legacy_Temp_CLSID;
+static LPCWSTR const k_Reg_CLSID_7zip_Legacy_Temp_Inproc = L"CLSID\\" k_7zip_Legacy_Temp_CLSID L"\\InprocServer32";
 
 
 #define g_AllUsers True
@@ -330,7 +333,7 @@ static void SetRegKey_Path2(HKEY parentKey)
     MyReg_DeleteVal_Path_if_Equal(key, k_Reg_Path);
 
     RegCloseKey(key);
-    // MyRegistry_DeleteKey(parentKey, k_Reg_Software_7zip);
+    MyRegistry_DeleteKey(parentKey, k_Reg_Software_7zip);
   }
 }
 
@@ -460,9 +463,11 @@ static LPCWSTR const k_CommandStore_Items[] =
   , L"WinZST.CompressTzs"
   , L"WinZST.CompressZip"
   , L"WinZST.Compress7z"
+  , L"WinZST.Test"
 };
 
 static LPCWSTR const k_AppPaths_7zFm = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinZSTFM.exe";
+static LPCWSTR const k_AppRegistration_7zFm = L"Software\\Classes\\Applications\\WinZSTFM.exe";
 #define k_REG_Uninstall L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
 static LPCWSTR const k_Uninstall_7zip = k_REG_Uninstall L"WinZST";
 
@@ -535,6 +540,31 @@ static void DeleteModernShellKeys(void)
     DeleteCommandStoreKey(k_CommandStore_Items[i]);
 }
 
+static void DeleteApplicationRegistration2(HKEY parentKey)
+{
+  WCHAR keyPath[MAX_PATH + 100];
+
+  wcscpy(keyPath, k_AppRegistration_7zFm);
+  wcscat(keyPath, L"\\shell\\open\\command");
+  MyRegistry_DeleteKey(parentKey, keyPath);
+
+  wcscpy(keyPath, k_AppRegistration_7zFm);
+  wcscat(keyPath, L"\\shell\\open");
+  MyRegistry_DeleteKey(parentKey, keyPath);
+
+  wcscpy(keyPath, k_AppRegistration_7zFm);
+  wcscat(keyPath, L"\\shell");
+  MyRegistry_DeleteKey(parentKey, keyPath);
+
+  MyRegistry_DeleteKey(parentKey, k_AppRegistration_7zFm);
+}
+
+static void DeleteApplicationRegistration(void)
+{
+  DeleteApplicationRegistration2(HKEY_CURRENT_USER);
+  DeleteApplicationRegistration2(HKEY_LOCAL_MACHINE);
+}
+
 static void DeleteShellExKeys(void)
 {
   unsigned i;
@@ -565,6 +595,22 @@ static void DeleteCLSIDIfOwned(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR clsi
   if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, inprocKey, NULL, s))
   {
     if (AreEqual_Path_PrefixName(s, path, dllName))
+    {
+      const LONG res = MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, inprocKey);
+      if (res == ERROR_SUCCESS)
+        MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, clsidKey);
+      DeleteApprovedValue(clsid);
+    }
+  }
+}
+
+static void DeleteCLSIDIfInstallPath(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR clsid)
+{
+  WCHAR s[MAX_PATH + 30];
+
+  if (MyRegistry_QueryString2(HKEY_CLASSES_ROOT, inprocKey, NULL, s))
+  {
+    if (IsString1PrefixedByString2_NoCase(s, path))
     {
       const LONG res = MyRegistry_DeleteKey(HKEY_CLASSES_ROOT, inprocKey);
       if (res == ERROR_SUCCESS)
@@ -615,6 +661,22 @@ static void DeleteCLSIDIfOwned_32(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR c
   }
 }
 
+static void DeleteCLSIDIfInstallPath_32(LPCWSTR inprocKey, LPCWSTR clsidKey, LPCWSTR clsid)
+{
+  WCHAR s[MAX_PATH + 30];
+
+  if (MyRegistry_QueryString2_32(HKEY_CLASSES_ROOT, inprocKey, NULL, s))
+  {
+    if (IsString1PrefixedByString2_NoCase(s, path))
+    {
+      const LONG res = MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, inprocKey);
+      if (res == ERROR_SUCCESS)
+        MyRegistry_DeleteKey_32(HKEY_CLASSES_ROOT, clsidKey);
+      DeleteApprovedValue_32(clsid);
+    }
+  }
+}
+
 #endif
 
 static void WriteCLSID(void)
@@ -628,6 +690,9 @@ static void WriteCLSID(void)
       k_7zip_CLSID, L"7-zip.dll");
   DeleteCLSIDIfOwned(k_Reg_CLSID_7zip_Legacy_Inproc, k_Reg_CLSID_7zip_Legacy,
       k_7zip_Legacy_CLSID, L"7-zip.dll");
+  DeleteCLSIDIfInstallPath(k_Reg_CLSID_7zip_Legacy_Temp_Inproc,
+      k_Reg_CLSID_7zip_Legacy_Temp, k_7zip_Legacy_Temp_CLSID);
+  DeleteApplicationRegistration();
 
 
   #ifdef USE_7ZIP_32_DLL
@@ -637,6 +702,8 @@ static void WriteCLSID(void)
       k_7zip_CLSID, L"7-zip32.dll");
   DeleteCLSIDIfOwned_32(k_Reg_CLSID_7zip_Legacy_Inproc, k_Reg_CLSID_7zip_Legacy,
       k_7zip_Legacy_CLSID, L"7-zip32.dll");
+  DeleteCLSIDIfInstallPath_32(k_Reg_CLSID_7zip_Legacy_Temp_Inproc,
+      k_Reg_CLSID_7zip_Legacy_Temp, k_7zip_Legacy_Temp_CLSID);
   
   #endif
 
